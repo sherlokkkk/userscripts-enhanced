@@ -1,9 +1,10 @@
 <script>
-	import { onMount } from "svelte";
+	import { onMount, onDestroy } from "svelte";
 	import { blur } from "svelte/transition";
 	import { items, log, notifications, settings, v4state } from "./store.js";
 	import Sidebar from "./Components/Sidebar/Sidebar.svelte";
 	import Editor from "./Components/Editor/Editor.svelte";
+	import DataTools from "./Components/DataTools.svelte";
 	import Settings from "./Components/Settings.svelte";
 	import ModalWrapper from "./Components/ModalWrapper.svelte";
 	import Notification from "./Components/Notification.svelte";
@@ -11,6 +12,23 @@
 	import { connectNative, sendNativeMessage } from "@ext/native.js";
 
 	const logger = [];
+	let showDataTools = location.hash.includes("enhanced");
+	function handleHash() {
+		if (location.hash.includes("enhanced")) {
+			showDataTools = true;
+			if ($v4state.includes("settings")) v4state.remove("settings");
+		} else if (
+			new URLSearchParams(location.hash.slice(1)).get("state") === "settings"
+		) {
+			showDataTools = false;
+			if (!$v4state.includes("settings")) v4state.add("settings");
+		}
+	}
+	function closeTools() {
+		showDataTools = false;
+		if (location.hash.includes("enhanced"))
+			history.replaceState(null, "", `${location.pathname}${location.search}`);
+	}
 
 	$: $log.some((item) => {
 		if (!logger.includes(item)) {
@@ -43,30 +61,47 @@
 	// 	}
 	// }
 
-	onMount(async () => {
-		log.add("Requesting initialization data", "info", false);
-		const initData = await sendNativeMessage({ name: "PAGE_INIT_DATA" });
-		if (initData.error) return console.error(initData.error);
-		await settings.init(initData);
-		v4state.add("items-loading");
-		v4state.remove("init");
-
-		log.add("Requesting all files in save location", "info", false);
-		const files = await sendNativeMessage({ name: "PAGE_ALL_FILES" });
-		if (files.error) return console.error(files.error);
-		items.set(files);
-		v4state.remove("items-loading");
-		v4state.loadUrlState();
-	});
-
-	// handle native app messages
-	const nativePort = connectNative();
-	nativePort.onMessage.addListener((message) => {
-		// console.info(message); // DEBUG
-		if (message.name === "SAVE_LOCATION_CHANGED") {
-			window.location.reload();
+	let initError = "";
+	let initializing = false;
+	let nativePort;
+	async function initialize() {
+		if (initializing) return;
+		initializing = true;
+		initError = "";
+		v4state.remove("init-error");
+		v4state.add("init");
+		try {
+			log.add("Requesting initialization data", "info", false);
+			const initData = await sendNativeMessage({ name: "PAGE_INIT_DATA" });
+			if (initData.error) throw new Error(initData.error);
+			await settings.init(initData);
+			v4state.add("items-loading");
+			const files = await sendNativeMessage({ name: "PAGE_ALL_FILES" });
+			if (files.error) throw new Error(files.error);
+			items.set(files);
+			v4state.remove("init");
+			v4state.loadUrlState();
+		} catch (error) {
+			initError = String(error.message ?? error);
+			v4state.add("init-error");
+			log.add(initError, "error", false);
+		} finally {
+			v4state.remove("items-loading");
+			initializing = false;
+		}
+	}
+	onMount(() => {
+		initialize();
+		try {
+			nativePort = connectNative();
+			nativePort.onMessage.addListener((message) => {
+				if (message.name === "SAVE_LOCATION_CHANGED") window.location.reload();
+			});
+		} catch (error) {
+			log.add(String(error.message ?? error), "error", false);
 		}
 	});
+	onDestroy(() => nativePort?.disconnect());
 
 	let splitterActive = false;
 	let sidebarHidden = false;
@@ -96,18 +131,24 @@
 	}
 </script>
 
-<svelte:window on:keydown={preventKeyCommands} />
+<svelte:window on:keydown={preventKeyCommands} on:hashchange={handleHash} />
 
 {#if $v4state.includes("init")}
 	<div class="initializer" out:blur={{ duration: 350 }}>
 		<LogoText />
 		{#if $v4state.includes("init-error")}
-			<span>Failed to initialize app, check the browser console</span>
+			<p role="alert">{initError}</p>
+			<button on:click={initialize} disabled={initializing}
+				>Retry connection</button
+			>
 		{:else}
 			<span>Initializing app...</span>
 		{/if}
 	</div>
 {/if}
+<button class="enhanced-tools" on:click={() => (showDataTools = true)}
+	>Data &amp; Updates</button
+>
 <main
 	style:--sidebar-width={sidebarWidth}
 	style:--sidebar-min-width={sidebarMinWidth}
@@ -143,7 +184,23 @@
 	</ModalWrapper>
 {/if}
 
+{#if showDataTools}
+	<ModalWrapper closeHandler={closeTools}><DataTools /></ModalWrapper>
+{/if}
+
 <style>
+	.enhanced-tools {
+		position: fixed;
+		right: 1rem;
+		bottom: 1rem;
+		z-index: 40;
+		border: 1px solid var(--border-color);
+		border-radius: 0.375rem;
+		background: var(--color-bg-secondary);
+		color: var(--text-color-primary);
+		padding: 0.5rem 0.75rem;
+	}
+
 	.initializer {
 		align-items: center;
 		background-color: var(--color-bg-primary);

@@ -97,7 +97,7 @@ func isEncoded(_ str: String) -> Bool {
 // parser REs - force try b/c pattern is known to be valid regex
 let re0 = try! NSRegularExpression(pattern: #"(?:(\/\/ ==UserScript==[ \t]*?\r?\n([\S\s]*?)\r?\n\/\/ ==\/UserScript==)([\S\s]*)|(\/\* ==UserStyle==[ \t]*?\r?\n([\S\s]*?)\r?\n==\/UserStyle== \*\/)([\S\s]*))"#, options: [])
 // RE for meta line
-let re1 = try! NSRegularExpression(pattern: #"^(?:[ \t]*(?:\/\/)?[ \t]*@)([\w-]+)[ \t]+([^\s]+[^\r\n\t\v\f]*)"#, options: [])
+let re1 = try! NSRegularExpression(pattern: #"^(?:[ \t]*(?:\/\/)?[ \t]*@)([\w:-]+)(?:[ \t]+([^\r\n]*))?$"#, options: [])
 // this pattern checks for specific keys that won't have values
 let re2 = try! NSRegularExpression(pattern: #"^(?:[ \t]*(?:\/\/)?[ \t]*@)(noframes)[ \t]*$"#, options: [])
 
@@ -116,7 +116,7 @@ func parse(_ content: String) -> [String: Any]? {
 	// the metadata can be in userscript or userstyle format, need to check for this and adjust group numbers
 	// rather than being too strict, text content can precede the opening userscript tag, however it will be ignored
 	// adjust start index of file content while assigning group numbers to account for any text content preceding opening tag
-	let contentStartIndex = content.index(content.startIndex, offsetBy: match.range.lowerBound)
+	guard let contentStartIndex = Range(match.range, in: content)?.lowerBound else { return nil }
 	let contentEndIndex = content.index(contentStartIndex, offsetBy: 15)
 	let metaHeadContent = content[contentStartIndex..<contentEndIndex]
 	var g1, g2, g3: Int
@@ -149,12 +149,12 @@ func parse(_ content: String) -> [String: Any]? {
 			if let m = re1.firstMatch(in: metaString, options: [], range: range) {
 				// force unwrap key & value since matches regex above
 				let key = metaString[Range(m.range(at: 1), in: metaString)!]
-				let value = metaString[Range(m.range(at: 2), in: metaString)!]
+				let value = Range(m.range(at: 2), in: metaString).map { String(metaString[$0]).trimmingCharacters(in: .whitespaces) } ?? ""
 				if metadata[String(key)] == nil {
 					// if key does not exist in metadata dict, add it
 					metadata[String(key)] = []
 				}
-				metadata[String(key)]?.append(String(value))
+				metadata[String(key)]?.append(value)
 			} else if let m2 = re2.firstMatch(in: metaString, options: [], range: range) {
 				// force unwrap key since matches regex above
 				let key = metaString[Range(m2.range(at: 1), in: metaString)!]
@@ -163,7 +163,7 @@ func parse(_ content: String) -> [String: Any]? {
 		}
 	}
 	// return nil/fail if @name key is missing or @name has no value
-	if metadata["name"] == nil {
+	if metadata["name"]?.first?.isEmpty != false {
 		return nil
 	}
 	// get the code
@@ -215,7 +215,7 @@ func updateManifest(with data: Manifest) -> Bool {
 		encoder.outputFormatting = .prettyPrinted
 		let encoded = try encoder.encode(content)
 		let fileContent = String(decoding: encoded, as: UTF8.self)
-		try fileContent.write(to: url, atomically: false, encoding: .utf8)
+		try fileContent.write(to: url, atomically: true, encoding: .utf8)
 		return true
 	} catch {
 		logger?.error("\(#function, privacy: .public) - failed to update manifest: \(error, privacy: .public)")
@@ -396,12 +396,11 @@ func updateManifestRequired(_ optionalFilesArray: [[String: Any]] = []) -> Bool 
 			continue
 		}
 
-		// create filenames from sanitized resource urls
-		// getRequiredCode does the same thing when saving to disk
+		// Match the hashed cache names used by getRequiredCode and getCode.
 		// populate array with entries for manifest
 		var r = [String]()
 		for resource in required {
-			let sanitizedResourceName = sanitize(resource)
+			let sanitizedResourceName = scriptRevision(resource) + ".txt"
 			r.append(sanitizedResourceName)
 		}
 
@@ -702,6 +701,7 @@ func getAllFiles(includeCode: Bool = false) -> [[String: Any]]? {
 		fileData["content"] = content
 		fileData["disabled"] = manifest.disabled.contains(filename)
 		fileData["filename"] = filename
+        fileData["scriptId"] = stableScriptId(filename)
 		fileData["lastModified"] = dateToMilliseconds(dateMod)
 		fileData["metadata"] = metadata
 		// force unwrap name since parser ensure it exists
@@ -731,76 +731,26 @@ func getAllFiles(includeCode: Bool = false) -> [[String: Any]]? {
 }
 
 func getRequiredCode(_ filename: String, _ resources: [String], _ fileType: String) -> Bool {
-	let directory = getRequireLocation().appendingPathComponent(filename)
-	// if file requires no resource but directory exists, remove it
-	// this resource is not user-generated and can be downloaded again, so just remove it instead of moves to the trash
-	// also in ios, the volume “Data” has no trash and item can only be removed directly
-	if resources.isEmpty {
-		if FileManager.default.fileExists(atPath: directory.path) {
-			do {
-				try FileManager.default.removeItem(at: directory)
-			} catch {
-				logger?.error("\(#function, privacy: .public) - failed to remove directory: \(error, privacy: .public)")
-			}
-		}
-		return true
-	}
-	// record URLs for subsequent processing
-	var resourceUrls = Set<URL>()
-	// loop through resource urls and attempt to fetch it
-	for resourceUrlString in resources {
-		// get the path of the url string
-		guard let resourceUrlPath = URLComponents(string: resourceUrlString)?.path else {
-			// if path can not be obtained, skip and log
-			logger?.info("\(#function, privacy: .public) - failed to get path on \(filename, privacy: .public) for \(resourceUrlString, privacy: .public)")
-			continue
-		}
-		// skip urls pointing to files of different types
-		if resourceUrlPath.hasSuffix(fileType) {
-			let resourceFilename = sanitize(resourceUrlString)
-			let fileURL = directory.appendingPathComponent(resourceFilename)
-			// insert url to resolve symlink into set
-			resourceUrls.insert(fileURL.standardizedFileURL)
-			// only attempt to get resource if it does not yet exist
-			if FileManager.default.fileExists(atPath: fileURL.path) {continue}
-			// get the remote file contents
-			guard let contents = getRemoteFileContents(resourceUrlString) else {continue}
-			// check if file specific folder exists at requires directory
-			if !FileManager.default.fileExists(atPath: directory.path) {
-				guard ((try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)) != nil) else {
-					logger?.info("\(#function, privacy: .public) - failed to create required code directory for \(filename, privacy: .public)")
-					return false
-				}
-			}
-			// finally write file to directory
-			guard ((try? contents.write(to: fileURL, atomically: false, encoding: .utf8)) != nil) else {
-				logger?.info("\(#function, privacy: .public) - failed to write content to file for \(filename, privacy: .public) from \(resourceUrlString, privacy: .public)")
-				return false
-			}
-		}
-	}
-	// cleanup downloaded files that are no longer required
-	do {
-		var downloadedUrls = Set<URL>()
-		// get all downloaded resources url
-		let fileUrls = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [])
-		// insert url to resolve symlink into set
-		for url in fileUrls { downloadedUrls.insert(url.standardizedFileURL) }
-		// exclude currently required resources
-		let abandonedUrls = downloadedUrls.subtracting(resourceUrls)
-		// loop through abandoned urls and attempt to remove it
-		for abandonFileUrl in abandonedUrls {
-			do {
-				try FileManager.default.removeItem(at: abandonFileUrl)
-				logger?.info("\(#function, privacy: .public) - cleanup abandoned resource: \(unsanitize(abandonFileUrl.lastPathComponent), privacy: .public)")
-			} catch {
-				logger?.error("\(#function, privacy: .public) - failed to remove abandoned resource: \(error, privacy: .public)")
-			}
-		}
-	} catch {
-		logger?.error("\(#function, privacy: .public) - failed to cleanup resources: \(error, privacy: .public)")
-	}
-	return true
+    guard ["js", "css"].contains(fileType) else { return false }
+    // Keep previous dependency versions so source rollback remains usable offline.
+    let directory = getRequireLocation().appendingPathComponent(filename)
+    do {
+        if resources.isEmpty { return true }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for source in resources {
+            let cache = directory.appendingPathComponent(scriptRevision(source) + ".txt")
+            if FileManager.default.fileExists(atPath: cache.path) {
+                try enhancedIntegrity(Data(contentsOf: cache), source)
+                continue
+            }
+            let content = try enhancedRemoteSource(source)
+            try content.write(to: cache, atomically: true, encoding: .utf8)
+        }
+        return true
+    } catch {
+        logger?.error("Required dependency preparation failed: \(error.localizedDescription, privacy: .public)")
+        return false
+    }
 }
 
 func checkForRemoteUpdates(_ optionalFilesArray: [[String: Any]] = []) -> [[String: String]]? {
@@ -1204,13 +1154,41 @@ func getCode(_ filenames: [String], _ isTop: Bool)-> [String: Any]? {
 		// get inject-into and set default if missing
 		var injectInto = metadata["inject-into"]?[0] ?? "auto"
 		let injectVals: Set<String> = ["auto", "content", "page"]
-		let runAtVals: Set<String> = ["context-menu", "document-start", "document-end", "document-idle"]
+		let runAtVals: Set<String> = ["context-menu", "document-start", "document-body", "document-end", "document-idle"]
 		let validGrants: Set<String> = [
+			"UE.registerPanel",
+			"GM_getValue",
+			"GM_setValue",
+			"GM_deleteValue",
+			"GM_listValues",
+			"GM_addValueChangeListener",
+			"GM_removeValueChangeListener",
+			"GM.addValueChangeListener",
+			"GM.removeValueChangeListener",
+			"GM_addStyle",
+			"GM_addElement",
+			"GM.addElement",
+			"GM_log",
+			"GM.log",
+			"GM_openInTab",
+			"GM_getTab",
+			"GM_saveTab",
+			"GM_getTabs",
+			"GM.getTabs",
+			"GM_setClipboard",
+			"GM_getResourceText",
+			"GM_getResourceURL",
+			"GM.getResourceText",
+			"GM.getResourceUrl",
+			"GM.getResourceURL",
+			"GM_registerMenuCommand",
+			"GM_unregisterMenuCommand",
+			"GM.registerMenuCommand",
+			"GM.unregisterMenuCommand",
 			"GM.info",
 			"GM_info",
 			"GM.addStyle",
 			"GM.openInTab",
-			"GM.closeTab",
 			"GM.setValue",
 			"GM.getValue",
 			"GM.deleteValue",
@@ -1256,10 +1234,13 @@ func getCode(_ filenames: [String], _ isTop: Bool)-> [String: Any]? {
 		let version = metadata["version"]?[0] ?? ""
 		let noframes = metadata["noframes"] != nil ? true : false
 		var scriptObject:[String: Any] = [
+			"metadata": metadata,
 			"description": description,
 			"excludes": excludes,
 			"exclude-match": excludeMatches,
 			"filename": filename,
+			"scriptId": stableScriptId(filename),
+			"revision": scriptRevision(contents["content"] as? String ?? ""),
 			"grant": grants,
 			"icon": icon,
 			"includes": includes,
@@ -1267,7 +1248,7 @@ func getCode(_ filenames: [String], _ isTop: Bool)-> [String: Any]? {
 			"matches": matches,
 			"name": name,
 			"noframes": noframes,
-			"namespace": "",
+			"namespace": metadata["namespace"]?.first ?? "",
 			"resources": "",
 			"require": requires,
 			"run-at": runAt,
@@ -1289,27 +1270,33 @@ func getCode(_ filenames: [String], _ isTop: Bool)-> [String: Any]? {
 				let value = metaline.value
 				// metalines without values aren't included in parsed metadata object
 				// the only exception is @noframes
-				scriptObject[key] = !value.isEmpty ? value : value[0]
+				scriptObject[key] = value
 			}
 		}
 		let scriptMetaStr = contents["metablock"] as? String ?? "??"
 
 		// attempt to get require resource from disk
 		// if required resource is inaccessible, log error and continue
-		if let required = metadata["require"] {
+		var missingDependency = false
+        if let required = metadata["require"] {
 			// reverse required metadata
 			// if required is ["A", "B", "C"], C gets added above B which is above A, etc..
 			// the reverse of that is desired
 			for require in required.reversed() {
-				let sanitizedName = sanitize(require)
+				let sanitizedName = scriptRevision(require) + ".txt"
 				let requiredFileURL = getRequireLocation().appendingPathComponent(filename).appendingPathComponent(sanitizedName)
-				if let requiredContent = try? String(contentsOf: requiredFileURL, encoding: .utf8) {
+				if let bytes = try? Data(contentsOf: requiredFileURL),
+                   (try? enhancedIntegrity(bytes, require)) != nil,
+                   let requiredContent = String(data: bytes, encoding: .utf8) {
 					code = "\(requiredContent)\n\(code)"
 				} else {
-					logger?.error("\(#function, privacy: .public) - failed at (3) for \(require, privacy: .public)")
+					logger?.error("\(#function, privacy: .public) - required dependency unavailable")
+                    missingDependency = true
 				}
 			}
 		}
+
+        if missingDependency { continue }
 
 		if type == "css" {
 			cssFiles.append([
@@ -1343,7 +1330,7 @@ func getCode(_ filenames: [String], _ isTop: Bool)-> [String: Any]? {
 	}
 	let resp = [
 		"files": ["css": cssFiles, "js": jsFiles, "menu": menuFiles],
-		"scriptHandler": "Userscripts",
+		"scriptHandler": "Userscripts Enhanced",
 		"scriptHandlerVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "??"
 	] as [String : Any]
 	return resp
@@ -1622,7 +1609,8 @@ func saveFile(_ item: [String: Any],_ content: String) -> [String: Any] {
 	}
 	guard
 		let oldFilename = item["filename"] as? String,
-		let type = item["type"] as? String
+		let type = item["type"] as? String, ["js", "css"].contains(type),
+        oldFilename == (oldFilename as NSString).lastPathComponent, !oldFilename.contains("\\"), !oldFilename.hasPrefix(".")
 	else {
 		return ["error": "invalid argument in save function"]
 	}
@@ -1638,7 +1626,7 @@ func saveFile(_ item: [String: Any],_ content: String) -> [String: Any] {
 	var name = sanitize(n)
 
 	// construct new file name
-	let newFilename = "\(name).user.\(type)"
+	let newFilename = enhancedFilename(metadata, type)
 
 	// security scope
 	let didStartAccessing = saveLocation.startAccessingSecurityScopedResource()
@@ -1680,13 +1668,16 @@ func saveFile(_ item: [String: Any],_ content: String) -> [String: Any] {
 	// attempt to save to disk
 	let newFileUrl = saveLocation.appendingPathComponent(newFilename)
 	do {
-		try newContent.write(to: newFileUrl, atomically: false, encoding: .utf8)
+		try newContent.write(to: newFileUrl, atomically: true, encoding: .utf8)
 	} catch {
 		logger?.error("\(#function, privacy: .public) - failed at (2)")
 		return ["error": "failed to write file to disk"]
 	}
 
 	// saved to disk successfully
+    if oldFilename != newFilename && item["temp"] as? Bool != true {
+        UserDefaults.standard.set(stableScriptId(oldFilename), forKey: "UE.ScriptId." + newFilename)
+    }
 
 	// get the file last modified date
 	guard
@@ -1917,7 +1908,12 @@ func installCheck(_ content: String) -> [String: Any] {
 		directive = "Tap"
 	#endif
 
-	if names.contains(newName) {
+	let newNamespace = metadata["namespace"]?.first ?? ""
+    let installed = files.contains { file in
+        guard let existing = file["metadata"] as? [String: [String]] else { return false }
+        return existing["name"]?.first == newName && (existing["namespace"]?.first ?? "") == newNamespace
+    }
+    if installed {
 		return [
 			"success": "\(directive) to re-install",
 			"metadata": metadata,
@@ -1936,14 +1932,23 @@ func installUserscript(_ url: String, _ type: String, _ content: String) -> [Str
 	guard
 		let parsed = parse(content),
 		let metadata = parsed["metadata"] as? [String: [String]],
-		let n = metadata["name"]?[0]
+		metadata["name"]?.first != nil
 	else {
 		logger?.error("\(#function, privacy: .public) - failed at (1)")
 		return ["error": "installUserscript failed at (1)"]
 	}
-	let name = sanitize(n)
-	let filename = "\(name).user.\(type)"
-
-	let saved = saveFile(["filename": filename, "type": type], content)
+	let filename = enhancedFilename(metadata, type)
+    let existing = getAllFiles() ?? []
+    if let collision = existing.first(where: { ($0["filename"] as? String)?.lowercased() == filename.lowercased() }),
+       let previous = collision["metadata"] as? [String: [String]],
+       previous["name"] != metadata["name"] || previous["namespace"] != metadata["namespace"] {
+        return ["error": "A different script already uses the generated filename"]
+    }
+    let same = existing.first { file in
+        guard let previous = file["metadata"] as? [String: [String]] else { return false }
+        return previous["name"] == metadata["name"] && previous["namespace"] == metadata["namespace"]
+    }
+    let oldFilename = same?["filename"] as? String ?? filename
+	let saved = saveFile(["filename": oldFilename, "type": type, "temp": same == nil], content)
 	return saved
 }

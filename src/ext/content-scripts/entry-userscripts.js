@@ -1,11 +1,121 @@
-import USAPI from "./api.js";
+import { createScriptSandbox } from "./script-sandbox.js";
+import { createTabAPI } from "./tab-runtime.js";
+import { createPageAPI } from "./page-api.js";
+import { createXhrAPI } from "./network-runtime.js";
+import { metadataWarnings } from "../shared/metadata.js";
+import { validGrants } from "../shared/utils.js";
+import { createValueStore } from "./value-store.js";
+import { MenuRuntime } from "./menu-runtime.js";
 import { colors } from "@shared/colors.js";
 
 // code received from background page will be stored in this variable
 // code referenced again when strict CSPs block initial injection attempt
 let data;
+let menuRuntime;
+const valueStores = [];
+const tabContexts = [];
+const sandboxContexts = [];
+const startedScripts = new Set();
+let bodyReady;
+let bodyObserver;
 // determines whether strict csp injection has already run (JS only)
 let cspFallbackAttempted = false;
+
+const SCRIPT_PREFS_KEY = "UE_SCRIPT_PREFS";
+let preferences = {};
+function scriptPreferences(scriptId) {
+	const own = Object.hasOwn(preferences, scriptId) ? preferences[scriptId] : {};
+	return Object.freeze({ autoPopup: own?.autoPopup !== false });
+}
+const pageMenuGrants = new Set([
+	"GM_registerMenuCommand",
+	"GM_unregisterMenuCommand",
+	"GM.registerMenuCommand",
+	"GM.unregisterMenuCommand",
+]);
+
+// Page-world scripts cannot receive functions from this world. Their menu
+// commands travel as JSON over per-injection random event names; clicks travel
+// back the same way. Only titles/options and a key cross; no capability does.
+function pageMenuBridge(userscript) {
+	const grants = userscript.pageMenuGrants ?? [];
+	if (!grants.length || !userscript.menuAPI) return "";
+	const channel = crypto.randomUUID();
+	const requestName = `ue-menu-request-${channel}`;
+	const runName = `ue-menu-run-${channel}`;
+	const commands = new Map();
+	const api = userscript.menuAPI;
+	const run = (key) =>
+		window.dispatchEvent(
+			new CustomEvent(runName, { detail: JSON.stringify({ key }) }),
+		);
+	const onRequest = (event) => {
+		let request;
+		try {
+			if (typeof event.detail !== "string" || event.detail.length > 4096)
+				return;
+			request = JSON.parse(event.detail);
+		} catch {
+			return;
+		}
+		const key = request?.key;
+		if (typeof key !== "string" || !key || key.length > 128) return;
+		try {
+			if (request.op === "register") {
+				const options = request.options ?? {};
+				const commandId = api.GM_registerMenuCommand(
+					String(request.title),
+					() => run(key),
+					{
+						id: commands.get(key),
+						accessKey:
+							typeof options.accessKey === "string" ? options.accessKey : "",
+						autoClose: options.autoClose !== false,
+						title: typeof options.title === "string" ? options.title : "",
+					},
+				);
+				commands.set(key, commandId);
+			} else if (request.op === "unregister" && commands.has(key)) {
+				api.GM_unregisterMenuCommand(commands.get(key));
+				commands.delete(key);
+			}
+		} catch (error) {
+			console.error(`${userscript.scriptObject.filename}: menu command`, error);
+		}
+	};
+	window.addEventListener(requestName, onRequest);
+	window.addEventListener("pagehide", (event) => {
+		if (!event.persisted) window.removeEventListener(requestName, onRequest);
+	});
+	const want = (grant) => grants.includes(grant);
+	return `const __ueMenu = (() => {
+	const dispatch = EventTarget.prototype.dispatchEvent, listen = EventTarget.prototype.addEventListener;
+	const Custom = CustomEvent, stringify = JSON.stringify, parse = JSON.parse, win = window;
+	const callbacks = new Map(); let sequence = 0;
+	const send = (data) => dispatch.call(win, new Custom(${JSON.stringify(requestName)}, { detail: stringify(data) }));
+	listen.call(win, ${JSON.stringify(runName)}, (event) => {
+		let key; try { key = parse(event.detail).key; } catch { return; }
+		const callback = callbacks.get(key);
+		if (callback) try { callback(new MouseEvent("click")); } catch (error) { console.error(error); }
+	});
+	const register = (title, callback, options) => {
+		if (typeof callback !== "function") throw new TypeError("Menu callback must be a function");
+		if (typeof options === "string") options = { accessKey: options };
+		if (!options || typeof options !== "object") options = {};
+		const key = options.id !== undefined ? String(options.id) : "ue" + ++sequence;
+		callbacks.set(key, callback);
+		send({ op: "register", key, title: String(title), options: { accessKey: options.accessKey, autoClose: options.autoClose, title: options.title } });
+		return key;
+	};
+	const unregister = (id) => { callbacks.delete(String(id)); send({ op: "unregister", key: String(id) }); };
+	return { register, unregister };
+})();
+${want("GM_registerMenuCommand") ? "const GM_registerMenuCommand = __ueMenu.register;" : ""}
+${want("GM_unregisterMenuCommand") ? "const GM_unregisterMenuCommand = __ueMenu.unregister;" : ""}
+${want("GM.registerMenuCommand") ? "GM.registerMenuCommand = async (...args) => __ueMenu.register(...args);" : ""}
+${want("GM.unregisterMenuCommand") ? "GM.unregisterMenuCommand = async (id) => __ueMenu.unregister(id);" : ""}
+`;
+}
 
 // label used to distinguish frames in console
 const label = randomLabel();
@@ -19,7 +129,19 @@ function randomLabel() {
 
 function triageJS(userscript) {
 	const runAt = userscript.scriptObject["run-at"];
-	if (runAt === "document-start") {
+	if (runAt === "document-body") {
+		if (!bodyReady)
+			bodyReady = new Promise((resolve) => {
+				if (document.body) return resolve();
+				bodyObserver = new MutationObserver(() => {
+					if (!document.body) return;
+					bodyObserver.disconnect();
+					resolve();
+				});
+				bodyObserver.observe(document, { childList: true, subtree: true });
+			});
+		bodyReady.then(() => injectJS(userscript));
+	} else if (runAt === "document-start") {
 		injectJS(userscript);
 	} else if (runAt === "document-end") {
 		if (document.readyState !== "loading") {
@@ -47,6 +169,9 @@ function triageJS(userscript) {
 }
 
 function injectJS(userscript) {
+	const scriptId = userscript.scriptObject.scriptId;
+	const repeatable = userscript.scriptObject["run-at"] === "context-menu";
+	if (!repeatable && startedScripts.has(scriptId)) return;
 	const filename = userscript.scriptObject.filename;
 	const name = userscript.scriptObject.name;
 	const code = `\
@@ -56,7 +181,7 @@ function injectJS(userscript) {
 ${userscript.code}
 // ===UserScript====end====
 	} catch (error) {
-		console.error(\`${filename.replaceAll("`", "\\`")}\`, error);
+		console.error(${JSON.stringify(filename)}, error);
 	}
 })(); //# sourceURL=${filename.replace(/[\s"']/g, "-") + usTag}`;
 	let injectInto = userscript.scriptObject["inject-into"];
@@ -81,15 +206,26 @@ ${userscript.code}
 		div.style.display = "none";
 		const shadowRoot = div.attachShadow({ mode: "closed" });
 		const tag = document.createElement("script");
-		tag.textContent = code;
+		const signal = `ue-start-${crypto.randomUUID()}`;
+		const didStart = () => startedScripts.add(scriptId);
+		window.addEventListener(signal, didStart, { once: true });
+		const info = JSON.stringify(userscript.apis.GM.info);
+		const menu = pageMenuBridge(userscript);
+		tag.textContent = `window.dispatchEvent(new Event(${JSON.stringify(signal)}));\n((info) => { const GM_info = info; const GM = { info };\n${menu}${code}\n})(${info});`;
 		shadowRoot.append(tag);
 		(document.body ?? document.head ?? document.documentElement).append(div);
+		window.removeEventListener(signal, didStart);
+		div.remove();
 	} else {
+		if (!repeatable) startedScripts.add(scriptId);
 		try {
-			Function(
-				`{${Object.keys(userscript.apis).join(",")}}`,
-				code,
-			)(userscript.apis);
+			// Never execute untrusted code in this privileged content-script realm.
+			const existing = sandboxContexts.find(
+				(context) => context.filename === filename,
+			);
+			const sandbox = existing?.sandbox ?? createScriptSandbox(userscript.apis);
+			if (!existing) sandboxContexts.push({ filename, sandbox });
+			sandbox.evaluate(code);
 		} catch (error) {
 			console.error(`${filename}`, error);
 		}
@@ -161,6 +297,13 @@ async function injection() {
 	}
 	// save response locally in case CSP events occur
 	data = response;
+	try {
+		const stored = await browser.storage.local.get(SCRIPT_PREFS_KEY);
+		const value = stored?.[SCRIPT_PREFS_KEY];
+		if (value && typeof value === "object") preferences = value;
+	} catch (error) {
+		console.warn("Userscripts Enhanced: script preferences unavailable", error);
+	}
 	// combine regular and context-menu scripts
 	const scripts = [...data.files.js, ...data.files.menu];
 	// loop through each userscript and prepare for processing
@@ -169,6 +312,132 @@ async function injection() {
 		const filename = userscript.scriptObject.filename;
 		const grants = userscript.scriptObject.grant;
 		const injectInto = userscript.scriptObject["inject-into"];
+		const menuAPI = menuRuntime.forScript(userscript.scriptObject);
+		const identity = {
+			scriptId: userscript.scriptObject.scriptId,
+			filename,
+			revision: userscript.scriptObject.revision,
+		};
+		let resources = Object.create(null);
+		if (
+			grants.some((grant) =>
+				[
+					"GM_getResourceText",
+					"GM_getResourceURL",
+					"GM.getResourceText",
+					"GM.getResourceUrl",
+					"GM.getResourceURL",
+				].includes(grant),
+			)
+		) {
+			const response = await browser.runtime.sendMessage({
+				name: "UE_RESOURCE_BUNDLE",
+				identity,
+			});
+			if (!response || response.error) {
+				console.error(
+					`${filename}: resource preparation failed`,
+					response?.error,
+				);
+				continue;
+			}
+			resources = Object.assign(Object.create(null), response.resources);
+		}
+		const resource = (key, field) => {
+			if (typeof key !== "string" || !Object.hasOwn(resources, key))
+				throw new Error(`Unknown @resource: ${key}`);
+			if (resources[key][field] === undefined)
+				throw new Error(`@resource ${key} is not UTF-8 text`);
+			return resources[key][field];
+		};
+		let tabAPI;
+		if (
+			grants.some((grant) =>
+				["openInTab", "getTab", "saveTab", "getTabs"].includes(
+					grant.replace(/^GM[._]/, ""),
+				),
+			)
+		) {
+			const context = createTabAPI({
+				browser,
+				identity,
+				baseURL: location.href,
+				reportError: (error) =>
+					console.error(`${filename}: tab API failed`, error),
+			});
+			context.filename = filename;
+			tabContexts.push(context);
+			tabAPI = context.api;
+		}
+		const clipboard = async (data, info = "text", callback) => {
+			const type =
+				typeof info === "object"
+					? (info.mimetype ??
+						(info.type === "html" ? "text/html" : "text/plain"))
+					: ["html", "text/html"].includes(info)
+						? "text/html"
+						: "text/plain";
+			const response = await browser.runtime.sendMessage({
+				name: "UE_CLIPBOARD",
+				identity,
+				data,
+				type,
+			});
+			if (!response?.ok)
+				throw new Error(response?.error ?? "Clipboard request unavailable");
+			callback?.();
+		};
+		const pageAPI = createPageAPI({
+			document,
+			name: userscript.scriptObject.name,
+			console,
+		});
+		const xhrAPI = createXhrAPI({
+			browser,
+			identity: {
+				scriptId: userscript.scriptObject.scriptId,
+				filename,
+				revision: userscript.scriptObject.revision,
+			},
+			baseURL: location.href,
+		});
+		for (const warning of metadataWarnings(
+			userscript.scriptObject.metadata ?? {},
+			validGrants,
+		)) {
+			console.warn(`${filename}: ${warning}`);
+		}
+		const storageNames = new Set([
+			"getValue",
+			"setValue",
+			"deleteValue",
+			"listValues",
+			"addValueChangeListener",
+			"removeValueChangeListener",
+		]);
+		let valueAPI;
+		if (
+			grants.some((grant) => storageNames.has(grant.replace(/^GM[._]/, "")))
+		) {
+			try {
+				const store = await createValueStore({
+					scriptId: userscript.scriptObject.scriptId,
+					storage: browser.storage.local,
+					changes: browser.storage.onChanged,
+					reportError: (error) =>
+						console.error(`${filename}: storage persistence failed`, error),
+				});
+				store.filename = filename;
+				valueStores.push(store);
+				valueAPI = store.api;
+			} catch (error) {
+				console.error(
+					`${filename}: storage initialization failed; script not executed`,
+					error,
+				);
+				continue;
+			}
+		}
 		// create GM.info object, all userscripts get access to GM.info
 		userscript.apis = { GM: {} };
 		userscript.apis.GM.info = {
@@ -177,19 +446,27 @@ async function injection() {
 			scriptHandlerVersion: data.scriptHandlerVersion,
 			scriptMetaStr: userscript.scriptMetaStr,
 			version: data.scriptHandlerVersion,
+			// Per-script user choices from the toolbar popup. Scripts that open
+			// panels on their own should honour autoPopup === false.
+			preferences: scriptPreferences(identity.scriptId),
 		};
+		userscript.menuAPI = menuAPI;
 		// add GM_info
 		userscript.apis.GM_info = userscript.apis.GM.info;
 		// if @grant explicitly set to none, empty grants array
 		if (grants.includes("none")) grants.length = 0;
 		// @grant values exist for page scoped userscript
 		if (grants.length && injectInto === "page") {
-			// remove grants
+			// Only toolbar menu commands are bridged into the page world; they carry
+			// titles and click notifications, never extension capabilities.
+			const kept = grants.filter((grant) => pageMenuGrants.has(grant));
+			const removed = grants.filter((grant) => !pageMenuGrants.has(grant));
 			grants.length = 0;
-			// log warning
-			console.warn(
-				`${filename} @grant values removed due to @inject-into value: ${injectInto} - https://github.com/quoid/userscripts/issues/265#issuecomment-1213462394`,
-			);
+			userscript.pageMenuGrants = kept;
+			if (removed.length)
+				console.warn(
+					`${filename} @grant values removed due to @inject-into value: ${injectInto} (${removed}) - https://github.com/quoid/userscripts/issues/265#issuecomment-1213462394`,
+				);
 		}
 		// @grant exist for auto scoped userscript
 		if (grants.length && injectInto === "auto") {
@@ -203,28 +480,100 @@ async function injection() {
 		// loop through each userscript @grant value, add methods as needed
 		for (let j = 0; j < grants.length; j++) {
 			const grant = grants[j];
-			const method = grant.startsWith("GM.") ? grant.slice(3) : grant;
-			// ensure API method exists in USAPI object
-			if (!Object.keys(USAPI).includes(method)) continue;
-			// add granted methods
-			switch (method) {
-				case "info":
-				case "GM_info":
-					continue;
-				case "getValue":
-				case "setValue":
-				case "deleteValue":
-				case "listValues":
-					userscript.apis.GM[method] = USAPI[method].bind({
-						US_filename: filename,
-					});
-					break;
-				case "GM_xmlhttpRequest":
-					userscript.apis[method] = USAPI[method];
-					break;
-				default:
-					userscript.apis.GM[method] = USAPI[method];
+			if (grant === "UE.registerPanel") {
+				userscript.apis.UE = Object.freeze({
+					version: 1,
+					registerPanel: menuAPI.registerPanel,
+				});
+				continue;
 			}
+			if (["GM_getResourceText", "GM_getResourceURL"].includes(grant)) {
+				userscript.apis[grant] = (key) =>
+					resource(key, grant.endsWith("Text") ? "text" : "url");
+				continue;
+			}
+			if (
+				[
+					"GM.getResourceText",
+					"GM.getResourceUrl",
+					"GM.getResourceURL",
+				].includes(grant)
+			) {
+				userscript.apis.GM[grant.slice(3)] = async (key) =>
+					resource(key, grant.endsWith("Text") ? "text" : "url");
+				continue;
+			}
+			const tabMethod = grant.startsWith("GM.") ? grant.slice(3) : grant;
+			if (tabAPI && Object.hasOwn(tabAPI, tabMethod)) {
+				if (grant.startsWith("GM."))
+					userscript.apis.GM[tabMethod] = tabAPI[tabMethod];
+				else userscript.apis[tabMethod] = tabAPI[tabMethod];
+				continue;
+			}
+			if (grant === "GM.setClipboard") {
+				userscript.apis.GM.setClipboard = clipboard;
+				continue;
+			}
+			if (grant === "GM_setClipboard") {
+				userscript.apis.GM_setClipboard = (...args) => {
+					clipboard(...args).catch((error) =>
+						console.error(`${filename}: clipboard failed`, error),
+					);
+				};
+				continue;
+			}
+			const pageMethod = grant.startsWith("GM.") ? grant.slice(3) : grant;
+			if (Object.hasOwn(pageAPI, pageMethod)) {
+				if (grant.startsWith("GM."))
+					userscript.apis.GM[pageMethod] = pageAPI[pageMethod];
+				else userscript.apis[pageMethod] = pageAPI[pageMethod];
+				continue;
+			}
+			if (grant === "GM_xmlhttpRequest") {
+				userscript.apis.GM_xmlhttpRequest = xhrAPI.GM_xmlhttpRequest;
+				continue;
+			}
+			if (grant === "GM.xmlHttpRequest") {
+				userscript.apis.GM.xmlHttpRequest = xhrAPI.xmlHttpRequest;
+				continue;
+			}
+			const valueMethod = grant.startsWith("GM.") ? grant.slice(3) : grant;
+			if (valueAPI && Object.hasOwn(valueAPI, valueMethod)) {
+				if (grant.startsWith("GM."))
+					userscript.apis.GM[valueMethod] = valueAPI[valueMethod];
+				else userscript.apis[valueMethod] = valueAPI[valueMethod];
+				continue;
+			}
+			if (
+				["GM_registerMenuCommand", "GM_unregisterMenuCommand"].includes(grant)
+			) {
+				userscript.apis[grant] = menuAPI[grant];
+				continue;
+			}
+			if (
+				["GM.registerMenuCommand", "GM.unregisterMenuCommand"].includes(grant)
+			) {
+				userscript.apis.GM[grant.slice(3)] = menuAPI[grant.slice(3)];
+				continue;
+			}
+		}
+
+		// Revocation also guards APIs already captured by a running script.
+		for (const [key, value] of Object.entries(userscript.apis)) {
+			if (typeof value !== "function") continue;
+			userscript.apis[key] = (...args) => {
+				if (menuRuntime.isRevoked(userscript.scriptObject.scriptId))
+					throw new Error("Script disabled; reload the page");
+				return value(...args);
+			};
+		}
+		for (const [key, value] of Object.entries(userscript.apis.GM)) {
+			if (typeof value !== "function") continue;
+			userscript.apis.GM[key] = async (...args) => {
+				if (menuRuntime.isRevoked(userscript.scriptObject.scriptId))
+					throw new Error("Script disabled; reload the page");
+				return value(...args);
+			};
 		}
 		// triage userjs item for injection
 		triageJS(userscript);
@@ -286,6 +635,74 @@ async function initialize() {
 	const key = "US_GLOBAL_ACTIVE";
 	const results = await browser.storage.local.get(key);
 	if (results[key] === false) return console.info("Userscripts off");
+	// A separate listener stays available in hidden/cross-origin frames.
+	menuRuntime = new MenuRuntime({
+		documentId: crypto.randomUUID(),
+		notify: () => {
+			browser.runtime
+				.sendMessage({ name: "UE_MENU_CHANGED" })
+				.catch((error) => {
+					console.warn(
+						"Userscripts Enhanced: menu notification unavailable",
+						String(error),
+					);
+				});
+		},
+		createEvent: (data) =>
+			data.type === "keydown"
+				? new KeyboardEvent("keydown", data)
+				: new MouseEvent("click", data),
+	});
+	const menuListener = (message, sender) => {
+		if (sender.id !== browser.runtime.id) return;
+		if (message?.name === "UE_MENU_SNAPSHOT")
+			return Promise.resolve(menuRuntime.snapshot());
+		if (message?.name === "UE_MENU_EXECUTE")
+			return menuRuntime.execute(message);
+		if (message?.name === "UE_MENU_REVOKE") {
+			menuRuntime.revoke(message.filename);
+			for (const context of sandboxContexts)
+				if (
+					message.filename === undefined ||
+					context.filename === message.filename
+				)
+					context.sandbox.dispose();
+			for (const store of valueStores)
+				if (
+					message.filename === undefined ||
+					store.filename === message.filename
+				)
+					store.dispose();
+			for (const context of tabContexts)
+				if (
+					message.filename === undefined ||
+					context.filename === message.filename
+				)
+					context.dispose();
+			return Promise.resolve({ ok: true });
+		}
+	};
+	browser.runtime.onMessage.addListener(menuListener);
+	browser.storage.onChanged.addListener((changes, area) => {
+		if (area === "local" && changes.US_GLOBAL_ACTIVE?.newValue === false) {
+			menuRuntime.revoke();
+			for (const context of sandboxContexts) context.sandbox.dispose();
+			for (const store of valueStores) store.dispose();
+			for (const context of tabContexts) context.dispose();
+		}
+	});
+	window.addEventListener("pagehide", (event) => {
+		if (event.persisted) menuRuntime.suspend(true);
+		else {
+			menuRuntime.dispose();
+			for (const context of sandboxContexts) context.sandbox.dispose();
+			bodyObserver?.disconnect();
+			for (const store of valueStores) store.dispose();
+			for (const context of tabContexts) context.dispose();
+			browser.runtime.onMessage.removeListener(menuListener);
+		}
+	});
+	window.addEventListener("pageshow", () => menuRuntime.suspend(false));
 	// start the injection process and add the listeners
 	injection();
 	listeners();

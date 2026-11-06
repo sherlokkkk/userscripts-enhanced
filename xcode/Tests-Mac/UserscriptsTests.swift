@@ -7,7 +7,20 @@
 //
 
 import XCTest
+import SafariServices
 @testable import Userscripts_Mac_Safari_Extension
+
+private final class NativeMessageTestContext: NSExtensionContext {
+    var suppliedItems: [Any] = []
+    var replies: [Any]?
+    var completionCount = 0
+    override var inputItems: [Any] { suppliedItems }
+    override func completeRequest(returningItems items: [Any]?, completionHandler: ((Bool) -> Void)? = nil) {
+        completionCount += 1
+        replies = items
+        completionHandler?(false)
+    }
+}
 
 class UserscriptsTests: XCTestCase {
 
@@ -19,6 +32,100 @@ class UserscriptsTests: XCTestCase {
 		// Put teardown code here. This method is called after the invocation of each test method in the class.
 	}
 
+
+    func testEnhancedNativeRequestCompletion() throws {
+        for payload in [nil, ["unexpected": "missing name"], ["name": "REQ_PLATFORM"]] as [[String: String]?] {
+            let context = NativeMessageTestContext()
+            if let payload = payload {
+                let item = NSExtensionItem()
+                item.userInfo = [SFExtensionMessageKey: payload]
+                context.suppliedItems = [item]
+            }
+            SafariWebExtensionHandler().beginRequest(with: context)
+            XCTAssertEqual(context.completionCount, 1)
+            let item = try XCTUnwrap(context.replies?.first as? NSExtensionItem)
+            let reply = try XCTUnwrap(item.userInfo?[SFExtensionMessageKey] as? [String: Any])
+            if payload?["name"] == "REQ_PLATFORM" {
+                XCTAssertEqual(reply["platform"] as? String, "macos")
+            } else {
+                XCTAssertEqual(reply["error"] as? String, "Missing native message name")
+            }
+        }
+    }
+
+    func testEnhancedMetadata() throws {
+        let source = "\u{FEFF}前缀🙂\r\n// ==UserScript==\r\n// @name 测试\r\n// @namespace example.namespace\r\n// @match https://example.com/*\r\n// @match https://example.org/*\r\n// @noframes\r\n// @empty\r\n// @name:zh-TW 測試\r\n// ==/UserScript==\r\nconst code = 1;"
+        let result = try XCTUnwrap(parse(source))
+        let metadata = try XCTUnwrap(result["metadata"] as? [String: [String]])
+        XCTAssertEqual(metadata["name"], ["测试"])
+        XCTAssertEqual(metadata["namespace"], ["example.namespace"])
+        XCTAssertEqual(metadata["match"]?.count, 2)
+        XCTAssertNotNil(metadata["noframes"])
+        XCTAssertEqual(metadata["empty"], [""])
+        XCTAssertEqual(metadata["name:zh-TW"], ["測試"])
+        XCTAssertEqual(result["code"] as? String, "const code = 1;")
+        XCTAssertNil(parse("// ==UserScript==\n// @name \n// ==/UserScript=="))
+    }
+
+    func testEnhancedIdentityAndRevision() throws {
+        let filename = "test-" + UUID().uuidString + ".user.js"
+        defer { UserDefaults.standard.removeObject(forKey: "UE.ScriptId." + filename) }
+        let identity = stableScriptId(filename)
+        XCTAssertNotNil(UUID(uuidString: identity))
+        XCTAssertEqual(identity, stableScriptId(filename))
+        XCTAssertEqual(scriptRevision("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        XCTAssertNotEqual(scriptRevision("abc"), scriptRevision("abcd"))
+    }
+
+    func testEnhancedMenuPathTraversalIsDenied() throws {
+        XCTAssertEqual(validateMenuScripts([["filename": "../outside.user.js", "scriptId": "fake", "revision": "fake"]]), [])
+        XCTAssertEqual(validateMenuScripts([["filename": "/tmp/outside.user.js", "scriptId": "fake", "revision": "fake"]]), [])
+        XCTAssertEqual(authorizeXHR(["filename": "../outside.user.js"])["allowed"] as? Bool, false)
+    }
+
+    func testEnhancedNamespaceAndIntegrity() throws {
+        let first = enhancedFilename(["name": ["Same"], "namespace": ["one"]], "js")
+        let second = enhancedFilename(["name": ["Same"], "namespace": ["two"]], "js")
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(first, enhancedFilename(["name": ["Same"], "namespace": ["one"]], "js"))
+        let data = Data("abc".utf8)
+        XCTAssertNoThrow(try enhancedIntegrity(data, "https://example.test/a#sha256=ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0="))
+        XCTAssertThrowsError(try enhancedIntegrity(data, "https://example.test/a#sha256=AAAA"))
+        XCTAssertThrowsError(try enhancedIntegrity(data, "https://example.test/a#md5=AAAA"))
+        XCTAssertThrowsError(try enhancedRemoteSource("file:///etc/passwd"))
+        XCTAssertThrowsError(try enhancedRemoteSource("http://example.test/script.user.js"))
+    }
+
+    func testEnhancedExclusionPrecedence() throws {
+        let manifest = Manifest(blacklist: [], declarativeNetRequest: [], disabled: [],
+            exclude: ["*private*": ["a.user.js"]], excludeMatch: ["https://example.com/admin/*": ["a.user.js"]],
+            include: [:], match: ["https://example.com/*": ["a.user.js"]], require: [:], settings: defaultSettings)
+        XCTAssertEqual(getMatchedFiles("https://example.com/public", manifest, false), ["a.user.js"])
+        XCTAssertEqual(getMatchedFiles("https://example.com/private", manifest, false), [])
+        XCTAssertEqual(getMatchedFiles("https://example.com/admin/users", manifest, false), [])
+        XCTAssertFalse(match("https://example.com/", "[invalid"))
+        XCTAssertFalse(include("https://example.com/", "/[invalid/"))
+    }
+
+    func testEnhancedBackupValidation() throws {
+        XCTAssertThrowsError(try enhancedValidateImport(["format": "tampermonkey", "version": 1, "scripts": []]))
+        XCTAssertThrowsError(try enhancedScriptURL("../outside.js"))
+        XCTAssertThrowsError(try enhancedScriptURL("/tmp/outside.user.js"))
+        XCTAssertThrowsError(try enhancedScriptURL(".hidden.user.js"))
+    }
+
+    func testEnhancedReservedURLCharacters() throws {
+        let parsed = try XCTUnwrap(jsLikeURL("https://用户名:密码@中.文:80/path/中%E6%96%87/%2F?q=%26#中文"))
+        XCTAssertEqual(parsed["hostname"], "xn--fiq.xn--7dv")
+        XCTAssertEqual(parsed["pathname"], "/path/%E4%B8%AD%E6%96%87/%2F")
+        XCTAssertEqual(parsed["search"], "?q=%26")
+    }
+
+    func testEnhancedOriginalContainerGuard() throws {
+        XCTAssertTrue(isUpstreamUserscriptsContainer(URL(fileURLWithPath: "/Users/test/Library/Containers/com.userscripts.macos")))
+        XCTAssertTrue(isUpstreamUserscriptsContainer(URL(fileURLWithPath: "/Users/test/Library/Group Containers/J74Q8V8V8N.com.userscripts.macos")))
+        XCTAssertFalse(isUpstreamUserscriptsContainer(URL(fileURLWithPath: "/Users/test/Library/Containers/local.userscripts-enhanced.mac.extension")))
+    }
 
 	func testExample() throws {
 		// This is an example of a functional test case.

@@ -16,5 +16,11 @@ SWIFT_ACTIVE_COMPILATION_CONDITIONS = EXT $(inherited)
 // Provisioning Profile
 PROVISIONING_PROFILE_SPECIFIER[config=Release] = match AppStore $(EXT_IDENTIFIER) macos
 
+PRODUCT_NAME = Userscripts Enhanced Extension
+PRODUCT_MODULE_NAME = Userscripts_Mac_Safari_Extension
+INFOPLIST_KEY_CFBundleDisplayName = Userscripts Enhanced
+INFOPLIST_KEY_CFBundleDisplayName[config=Debug] = Userscripts Enhanced
+PROVISIONING_PROFILE_SPECIFIER[config=Release] =
+
 // Override this file
 #include? "Mac-Safari-Extension.dev.xcconfig"

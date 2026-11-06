@@ -1,0 +1,63 @@
+{
+	"measuredAt": "2026年11月6日星期五 GMT+8 03:05:30",
+	"environment": {
+		"node": "v26.11.1",
+		"platform": "darwin",
+		"arch": "arm64",
+		"cpu": "Apple M6"
+	},
+	"results": [
+		{
+			"scripts": 0,
+			"frames": 1,
+			"commands": 0,
+			"registrationMs": 0.01916699999999949,
+			"snapshotP50Ms": 0.00016700000000113846,
+			"snapshotP95Ms": 0.0006249999999994316,
+			"bytes": 42
+		},
+		{
+			"scripts": 1,
+			"frames": 1,
+			"commands": 7,
+			"registrationMs": 0.09120799999999996,
+			"snapshotP50Ms": 0.0007500000000000284,
+			"snapshotP95Ms": 0.001665999999998391,
+			"bytes": 1089
+		},
+		{
+			"scripts": 20,
+			"frames": 1,
+			"commands": 140,
+			"registrationMs": 0.0705840000000002,
+			"snapshotP50Ms": 0.011167000000000371,
+			"snapshotP95Ms": 0.018667000000000655,
+			"bytes": 21203
+		},
+		{
+			"scripts": 50,
+			"frames": 1,
+			"commands": 350,
+			"registrationMs": 0.1196249999999992,
+			"snapshotP50Ms": 0.025000000000005684,
+			"snapshotP95Ms": 0.036583000000000254,
+			"bytes": 53153
+		},
+		{
+			"scripts": 20,
+			"frames": 5,
+			"commands": 700,
+			"registrationMs": 0.17687500000000256,
+			"snapshotP50Ms": 0.04958400000000296,
+			"snapshotP95Ms": 0.06141700000000583,
+			"bytes": 106011
+		}
+	],
+	"soak": {
+		"iterations": 100000,
+		"durationMs": 11.438084000000003,
+		"remainingScriptsWithCommands": 0,
+		"heapDeltaBytes": -348648
+	},
+	"scope": "Node menu registry and JSON serialization only. Safari browser/native IPC, CPU, UI latency and long browsing sessions remain unmeasured."
+}

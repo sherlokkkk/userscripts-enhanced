@@ -1,3 +1,5 @@
+import { createNativeClient } from "./native-client.js";
+
 /**
  * @file exchange messages between `web extension` and `native application`
  * @see {@link https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging}
@@ -24,5 +26,7 @@ export function connectNative() {
  * @returns {Promise<any>} A response of JSON object or no arguments
  */
 export function sendNativeMessage(message) {
-	return browser.runtime.sendNativeMessage(application(), message);
+	return createNativeClient(browser.runtime, { application: application() })(
+		message,
+	);
 }

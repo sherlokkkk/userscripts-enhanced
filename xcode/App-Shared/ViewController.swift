@@ -35,6 +35,14 @@ class ViewController: PlatformViewController, WKNavigationDelegate, WKScriptMess
 		configuration.setURLSchemeHandler(USchemeHandler(), forURLScheme: AppWebViewUrlScheme)
 		// https://developer.apple.com/documentation/webkit/wkusercontentcontroller
 		configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "controller")
+        configuration.userContentController.addUserScript(WKUserScript(source: """
+        window.addEventListener('error', e => {
+            window.webkit.messageHandlers.controller.postMessage({kind: 'UE_WEBVIEW_ERROR', message: String(e.message || 'Resource failed'), file: String(e.filename || '')});
+        });
+        window.addEventListener('unhandledrejection', e => {
+            window.webkit.messageHandlers.controller.postMessage({kind: 'UE_WEBVIEW_ERROR', message: String(e.reason)});
+        });
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
 		// https://developer.apple.com/documentation/webkit/wkwebview
 		self.webView = WKWebView(frame: .zero, configuration: configuration)
 #if os(iOS)
@@ -66,7 +74,7 @@ class ViewController: PlatformViewController, WKNavigationDelegate, WKScriptMess
 #if VITE
 		let url = URL(string: "https://userscripts.test:55173/entry-app-webview.html")!
 #else
-		let url = URL(string: "\(AppWebViewUrlScheme):///")!
+		let url = URL(string: "\(AppWebViewUrlScheme)://app/")!
 #endif
 		self.webView.load(URLRequest(url: url))
 #if os(macOS)
@@ -126,7 +134,11 @@ class ViewController: PlatformViewController, WKNavigationDelegate, WKScriptMess
 	}
 
 	func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) async -> (Any?, String?) {
-		guard let name = message.body as? String else {
+		if let diagnostic = message.body as? [String: String], diagnostic["kind"] == "UE_WEBVIEW_ERROR" {
+            NSLog("Enhanced WebView: %@", diagnostic["message"] ?? "Unknown error")
+            return (nil, nil)
+        }
+        guard let name = message.body as? String else {
 			logger?.error("\(#function, privacy: .public) - Userscripts iOS received a message without a name")
 			return (nil, "bad message body")
 		}
@@ -144,13 +156,10 @@ class ViewController: PlatformViewController, WKNavigationDelegate, WKScriptMess
 			let platform = "ios"
 #elseif os(macOS)
 			let platform = "mac"
-			do {
-				let state = try await SFSafariExtensionManager.stateOfSafariExtension(withIdentifier: extIdentifier)
-				self.extensionState = state.isEnabled ? .on : .off
-			} catch {
-				self.extensionState = .error
-				logger?.error("\(#function, privacy: .public) - \(error, privacy: .public)")
-			}
+            // Safari may take a long time to answer for a newly registered extension.
+            // Return host initialization immediately and update status asynchronously.
+            self.handleExtensionStateChange()
+
 			if #available(macOS 13, *) {
 				useSettingsInsteadOfPreferences = true
 			}
@@ -319,20 +328,9 @@ extension ViewController {
 
 	// Only update the view when the window is visible
 	@objc func handleOcclusionStateChange() {
-		let occlusionState = NSApplication.shared.occlusionState
-		if occlusionState.contains(.visible) {
-			if timerExtensionStateCheck?.isValid != true {
-				timerExtensionStateCheck = Timer.scheduledTimer(
-					timeInterval: 0.2,
-					target: self,
-					selector: #selector(handleExtensionStateChange),
-					userInfo: nil,
-					repeats: true
-				)
-			}
-		} else {
-			timerExtensionStateCheck?.invalidate()
-		}
+        if NSApplication.shared.occlusionState.contains(.visible) {
+            handleExtensionStateChange()
+        }
 	}
 
 	// Update webview extension status display via timer

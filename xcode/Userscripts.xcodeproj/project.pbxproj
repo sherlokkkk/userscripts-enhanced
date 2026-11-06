@@ -62,6 +62,9 @@
 		78B25585299D4C27000B2E9B /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78B25582299D4C27000B2E9B /* Utilities.swift */; };
 		78B25586299D4C27000B2E9B /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78B25582299D4C27000B2E9B /* Utilities.swift */; };
 		78B25587299D4C27000B2E9B /* Utilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78B25582299D4C27000B2E9B /* Utilities.swift */; };
+		4BC6CF6F724D47928750C72D /* Enhanced.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C625B4CC4E4A0E8FABAF49 /* Enhanced.swift */; };
+		4CA9C77F39974CF190028D91 /* Enhanced.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C625B4CC4E4A0E8FABAF49 /* Enhanced.swift */; };
+		F9BA344C21794BAE99013F7B /* Enhanced.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C625B4CC4E4A0E8FABAF49 /* Enhanced.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -162,6 +165,7 @@
 		7878ED34299BBEBF00E36A24 /* iOS-App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "iOS-App.xcconfig"; sourceTree = "<group>"; };
 		7878ED38299BBEBF00E36A24 /* Mac-App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Mac-App.xcconfig"; sourceTree = "<group>"; };
 		78B25582299D4C27000B2E9B /* Utilities.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Utilities.swift; sourceTree = "<group>"; };
+		B7C625B4CC4E4A0E8FABAF49 /* Enhanced.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Enhanced.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -297,6 +301,7 @@
 				4AF1DD0D268265DB00086E88 /* Resources */,
 				4A57BA07227235CE008A9763 /* SafariWebExtensionHandler.swift */,
 				4AED6491268CDB58001794BF /* Functions.swift */,
+				B7C625B4CC4E4A0E8FABAF49 /* Enhanced.swift */,
 			);
 			path = "Ext-Safari";
 			sourceTree = "<group>";
@@ -588,7 +593,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "sed \"s/_VERSION_/$MARKETING_VERSION/\" $SRCROOT/$MANIFEST_FILE > $TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/manifest.json\nsed -i \"\" \"s/_NAME_/$MANIFEST_NAME/\" $TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/_locales/en/messages.json\n";
+			shellScript = "sed \"s/_VERSION_/$MARKETING_VERSION/\" \"$SRCROOT/$MANIFEST_FILE\" > \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/manifest.json\"\nsed -i \"\" \"s/_NAME_/$MANIFEST_NAME/\" \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/_locales/en/messages.json\"\n";
 		};
 		039F59592ADFA415002E9977 /* UScript: Produce ext manifest.json */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -610,7 +615,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "sed \"s/_VERSION_/$MARKETING_VERSION/\" $SRCROOT/$MANIFEST_FILE > $TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/manifest.json\nsed -i \"\" \"s/_NAME_/$MANIFEST_NAME/\" $TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/_locales/en/messages.json\n";
+			shellScript = "sed \"s/_VERSION_/$MARKETING_VERSION/\" \"$SRCROOT/$MANIFEST_FILE\" > \"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/manifest.json\"\nsed -i \"\" \"s/_NAME_/$MANIFEST_NAME/\" \"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/_locales/en/messages.json\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -623,6 +628,7 @@
 				030FCADC2B189AAB004D13CD /* UrlPolyfill.swift in Sources */,
 				030FCAD42B182008004D13CD /* UrlCodecTests.swift in Sources */,
 				4A143AB2279DEA170029BFD0 /* Functions.swift in Sources */,
+				4BC6CF6F724D47928750C72D /* Enhanced.swift in Sources */,
 				03C24F9B2ABD2CBB00F130F9 /* Preferences.swift in Sources */,
 				78B25587299D4C27000B2E9B /* Utilities.swift in Sources */,
 				4A143AAC279DE6FF0029BFD0 /* UserscriptsTests.swift in Sources */,
@@ -655,6 +661,7 @@
 				030FCADD2B18BF70004D13CD /* UrlPolyfill.swift in Sources */,
 				03C24F9A2ABD2CBB00F130F9 /* Preferences.swift in Sources */,
 				4A301B32270A49F200C7E9E1 /* Functions.swift in Sources */,
+				4CA9C77F39974CF190028D91 /* Enhanced.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -682,6 +689,7 @@
 				030FCADF2B18BF72004D13CD /* UrlPolyfill.swift in Sources */,
 				03C24F982ABD2CBB00F130F9 /* Preferences.swift in Sources */,
 				4AED6492268CDB58001794BF /* Functions.swift in Sources */,
+				F9BA344C21794BAE99013F7B /* Enhanced.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

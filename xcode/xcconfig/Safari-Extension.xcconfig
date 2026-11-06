@@ -3,3 +3,6 @@ MANIFEST_FILE = $(SRC_DIR)/Resources/manifest.json
 MANIFEST_NAME = $(PROJECT_NAME)
 MANIFEST_NAME[config=Debug] = $(PROJECT_NAME)-Debug
 MANIFEST_NAME[config=Vite] = $(PROJECT_NAME)-Vite
+MANIFEST_NAME = Userscripts Enhanced
+MANIFEST_NAME[config=Debug] = Userscripts Enhanced Debug
+MANIFEST_NAME[config=Vite] = Userscripts Enhanced Vite

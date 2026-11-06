@@ -55,6 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 		window = NSWindow()
 		window.styleMask = [.titled, .closable, .miniaturizable]
 //		window.styleMask = [.titled, .closable, .resizable, .miniaturizable] // DEBUG
+		window.title = "Userscripts Enhanced"
 		window.titlebarAppearsTransparent = true
 		// Initialize webview
 		window.contentViewController = ViewController()

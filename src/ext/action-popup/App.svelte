@@ -1,22 +1,120 @@
 <script>
-	import { onMount } from "svelte";
+	import { onMount, onDestroy } from "svelte";
 	import IconButton from "@shared/Components/IconButton.svelte";
 	import Toggle from "@shared/Components/Toggle.svelte";
 	import Loader from "@shared/Components/Loader.svelte";
-	import PopupItem from "./Components/PopupItem.svelte";
+	import ScriptCommands from "./Components/ScriptCommands.svelte";
 	import View from "./Components/View.svelte";
 	import UpdateView from "./Components/Views/UpdateView.svelte";
 	import InstallView from "./Components/Views/InstallView.svelte";
 	import AllItemsView from "./Components/Views/AllItemsView.svelte";
-	import iconOpen from "@shared/img/icon-open.svg?raw";
-	import iconUpdate from "@shared/img/icon-update.svg?raw";
 	import iconClear from "@shared/img/icon-clear.svg?raw";
 	import iconRefresh from "@shared/img/icon-refresh.svg?raw";
-	import { extensionPaths, openExtensionPage } from "@ext/utils.js";
+	import { extensionPaths, openExtensionPage, parse } from "@ext/utils.js";
 	import { connectNative, sendNativeMessage } from "@ext/native.js";
 	import * as settingsStorage from "@ext/settings.js";
 
+	function accessKey(event) {
+		if (
+			!event.isTrusted ||
+			event.repeat ||
+			event.defaultPrevented ||
+			event.metaKey ||
+			event.altKey ||
+			event.ctrlKey ||
+			event.key.length !== 1
+		)
+			return;
+		if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target?.tagName)) return;
+		const buttons = [
+			...document.querySelectorAll("button[data-ue-access-key]"),
+		].filter(
+			(button) =>
+				!button.disabled &&
+				button.dataset.ueAccessKey === event.key.toLowerCase(),
+		);
+		if (buttons.length === 1) {
+			event.preventDefault();
+			buttons[0].click();
+		}
+	}
+
 	let errorNotification;
+	let menuGroups = [];
+	let currentTabId;
+	let currentHost = "";
+	let scriptSearch = "";
+	let selectedFilename = "";
+	$: selectedItem = items.find((item) => item.filename === selectedFilename);
+	const SCRIPT_PREFS_KEY = "UE_SCRIPT_PREFS";
+	let scriptPrefs = {};
+	async function loadScriptPrefs() {
+		try {
+			const stored = await browser.storage.local.get(SCRIPT_PREFS_KEY);
+			const value = stored?.[SCRIPT_PREFS_KEY];
+			scriptPrefs = value && typeof value === "object" ? value : {};
+		} catch (error) {
+			errorNotification = String(error.message ?? error);
+		}
+	}
+	async function setScriptPreference(item, key, value) {
+		if (!item?.scriptId) return;
+		const stored = (await browser.storage.local.get(SCRIPT_PREFS_KEY))?.[
+			SCRIPT_PREFS_KEY
+		];
+		const next = stored && typeof stored === "object" ? { ...stored } : {};
+		next[item.scriptId] = { ...(next[item.scriptId] ?? {}), [key]: value };
+		await browser.storage.local.set({ [SCRIPT_PREFS_KEY]: next });
+		scriptPrefs = next;
+	}
+	async function reloadCurrentTab() {
+		if (currentTabId === undefined) return;
+		await browser.tabs.reload(currentTabId);
+		window.close();
+	}
+	async function openScriptInManager(item) {
+		await openExtensionPage();
+		const base = browser.runtime.getURL(extensionPaths.page);
+		const tabs = await browser.tabs.query({});
+		const page = tabs.find((tab) => tab.url?.startsWith(base));
+		const params = new URLSearchParams({ script: item.filename });
+		if (page)
+			await browser.tabs.update(page.id, {
+				url: `${base}#${params}`,
+				active: true,
+			});
+		window.close();
+	}
+	let menuRequest = 0;
+	async function refreshCommands() {
+		if (currentTabId === undefined) return;
+		const request = ++menuRequest;
+		try {
+			const response = await browser.runtime.sendMessage({
+				name: "UE_MENU_LIST",
+				tabId: currentTabId,
+			});
+			if (request !== menuRequest) return;
+			if (!response?.ok)
+				throw new Error(response?.error ?? "Command list unavailable");
+			menuGroups = response.scripts;
+		} catch (error) {
+			if (request !== menuRequest) return;
+			menuGroups = [];
+			errorNotification = String(error.message ?? error);
+		}
+	}
+	const menuMessage = (message, sender) => {
+		if (
+			sender.id === browser.runtime.id &&
+			message?.name === "UE_MENU_REFRESH" &&
+			message.tabId === currentTabId
+		)
+			refreshCommands();
+	};
+	browser.runtime.onMessage.addListener(menuMessage);
+	onDestroy(() => browser.runtime.onMessage.removeListener(menuMessage));
+
 	let active = true;
 	let loading = true;
 	let disabled = true;
@@ -50,65 +148,36 @@
 	let allItems = [];
 	let abort = false;
 
-	$: list = items.sort((a, b) => a.name.localeCompare(b.name));
-
-	function getItemBackgroundColor(elements, index) {
-		if (elements.length < 2) return null;
-		if (elements.length % 2 === 0 && index % 2 === 0) return "light";
-		if (elements.length % 2 !== 0 && index % 2 !== 0) return "light";
-		return null;
-	}
+	$: list = items
+		.filter((item) =>
+			item.name.toLowerCase().includes(scriptSearch.toLowerCase()),
+		)
+		.sort((a, b) => a.name.localeCompare(b.name));
 
 	async function toggleExtension() {
 		const keys = {};
 		keys["global_active"] = !active;
 		await settingsStorage.set(keys);
 		active = await settingsStorage.get("global_active");
+		if (!active)
+			await browser.runtime.sendMessage({ name: "UE_MENU_INVALIDATE" });
+		menuGroups = [];
 		// TODO: delete after migrating all related logic on the native
 		sendNativeMessage({ name: "TOGGLE_EXTENSION", active: String(active) });
 	}
 
 	async function updateAll() {
-		showUpdates = false;
-		disabled = true;
-		loading = true;
-		const response = await sendNativeMessage({ name: "POPUP_UPDATE_ALL" });
-		if (response.error) {
-			errorNotification = response.error;
-		} else {
-			if (response.items) items = response.items;
-			updates = response.updates;
-		}
-		disabled = false;
-		loading = false;
+		await openExtensionPage();
+		const url = browser.runtime.getURL(`${extensionPaths.page}#enhanced`);
+		const tabs = await browser.tabs.query({});
+		const tab = tabs.find((item) =>
+			item.url?.startsWith(browser.runtime.getURL(extensionPaths.page)),
+		);
+		if (tab) await browser.tabs.update(tab.id, { url, active: true });
+		window.close();
 	}
-
-	async function updateItem(item) {
-		disabled = true;
-		const currentTab = await browser.tabs.getCurrent();
-		const url = currentTab.url;
-		const frameUrls = [];
-		if (url) {
-			const frames = await browser.webNavigation.getAllFrames({
-				tabId: currentTab.id,
-			});
-			frames.forEach((frame) => frameUrls.push(frame.url));
-		}
-		const message = {
-			name: "POPUP_UPDATE_SINGLE",
-			filename: item.filename,
-			url,
-			frameUrls,
-		};
-		const response = await sendNativeMessage(message);
-		if (response.error) {
-			errorNotification = response.error;
-			showUpdates = false;
-		} else {
-			updates = updates.filter((e) => e.filename !== item.filename);
-			items = response.items;
-		}
-		disabled = false;
+	async function updateItem() {
+		return updateAll();
 	}
 
 	async function toggleItem(item) {
@@ -121,23 +190,43 @@
 			const i = items.findIndex((el) => el === item);
 			const j = allItems.findIndex((el) => el === item);
 			item.disabled = !item.disabled;
+			if (item.disabled)
+				await browser.runtime.sendMessage({
+					name: "UE_MENU_INVALIDATE",
+					filename: item.filename,
+				});
+			await refreshCommands();
 			items[i] = item;
 			if (j >= 0) allItems[j] = item;
 		}
 		disabled = false;
 	}
 
+	function updateItems(states) {
+		return Object.values(states ?? {})
+			.filter((state) => state.available)
+			.map((state) => ({
+				filename: state.filename,
+				name:
+					items.find((item) => item.filename === state.filename)?.name ??
+					state.filename,
+				url: state.url,
+			}));
+	}
 	async function checkForUpdates() {
 		disabled = true;
-		initError = false;
-		const response = await sendNativeMessage({ name: "POPUP_CHECK_UPDATES" });
-		if (response.error) {
-			errorNotification = response.error;
-			showUpdates = false;
-		} else {
-			updates = response.updates;
+		try {
+			const result = await browser.runtime.sendMessage({
+				name: "UE_UPDATE_CHECK",
+			});
+			if (!result?.ok)
+				throw new Error(result?.error ?? "Update check unavailable");
+			updates = updateItems(result.states);
+		} catch (error) {
+			errorNotification = String(error.message ?? error);
+		} finally {
+			disabled = false;
 		}
-		disabled = false;
 	}
 
 	function refreshView() {
@@ -153,50 +242,6 @@
 		inactive = false;
 		abort = false;
 		initialize();
-	}
-
-	async function shouldCheckForUpdates() {
-		// if there's no network connectivity, do not check for updates
-		if (!window || !window.navigator || !window.navigator.onLine) {
-			console.info("user is offline, not running update check");
-			return false;
-		}
-		// when an update check is run, a timestamp is saved to extension storage
-		// only check for updates every n milliseconds to avoid delaying popup load regularly
-		const days = await settingsStorage.get("scripts_update_check_interval");
-		// user set to never check
-		if (days === 0) {
-			console.info("user scripts update check disabled");
-			return false;
-		}
-		const checkInterval = days * 24 * 60 * 60 * 1000; // 24hr, 86400000
-		const timestampMs = Date.now();
-		const checkLasttime = await settingsStorage.get(
-			"scripts_update_check_lasttime",
-		);
-		// If last check time does not exist, run the check
-		// new time will be saved after the update check runs
-		if (checkLasttime === 0) {
-			console.info("no last check saved, running update check");
-			return true;
-		}
-		// if the val is not a number, something went wrong, check anyway
-		// when update re-runs, new val of the proper type will be saved
-		if (!Number.isFinite(checkLasttime)) {
-			console.info("run check saved with wrong type, running update check");
-			return true;
-		}
-		// if less than n milliseconds have passed, don't check
-		if (timestampMs - checkLasttime < checkInterval) {
-			console.info("not enough time has passed, not running update check");
-			return false;
-		}
-		console.info(
-			`${(timestampMs - checkLasttime) / (1000 * 60 * 60)} hours have passed`,
-		);
-		console.info("running update check");
-		// otherwise run the check
-		return true;
 	}
 
 	async function openSaveLocation() {
@@ -224,6 +269,18 @@
 	}
 
 	async function initialize() {
+		initError = false;
+		try {
+			await initializeData();
+		} catch (error) {
+			initError = true;
+			errorNotification = String(error.message ?? error);
+		} finally {
+			loading = false;
+			disabled = Boolean(inactive || initError);
+		}
+	}
+	async function initializeData() {
 		// get platform first since it applies important styling
 		let pltfm;
 		try {
@@ -231,6 +288,7 @@
 		} catch (error) {
 			console.error(`Error for pltfm promise: ${error}`);
 			initError = true;
+			errorNotification = String(error.message ?? error);
 			loading = false;
 			return;
 		}
@@ -266,7 +324,15 @@
 		active = await settingsStorage.get("global_active");
 
 		// get matches
-		const currentTab = await browser.tabs.getCurrent();
+		const [currentTab] = await browser.tabs.query({
+			active: true,
+			currentWindow: true,
+		});
+		if (!currentTab) throw new Error("No active Safari tab available");
+		currentTabId = currentTab.id;
+		if (currentTab?.url?.startsWith("http"))
+			currentHost = new URL(currentTab.url).host;
+		refreshCommands();
 		const url = currentTab.url;
 		if (!url) {
 			loading = false;
@@ -301,6 +367,7 @@
 		} catch (error) {
 			console.error(`Error for matches promise: ${error}`);
 			initError = true;
+			errorNotification = String(error.message ?? error);
 			loading = false;
 			return;
 		}
@@ -311,36 +378,12 @@
 			return;
 		}
 		items = matches.matches;
+		await loadScriptPrefs();
+		updates = updateItems(
+			(await browser.storage.local.get("UE_UPDATES")).UE_UPDATES,
+		);
 
-		// get updates
-		const checkUpdates = await shouldCheckForUpdates();
-		if (checkUpdates) {
-			let updatesResponse;
-			try {
-				// save timestamp in ms to extension storage
-				const timestampMs = Date.now();
-				const keys = {};
-				keys["scripts_update_check_lasttime"] = timestampMs;
-				await settingsStorage.set(keys);
-				abort = true;
-				updatesResponse = await sendNativeMessage({ name: "POPUP_UPDATES" });
-			} catch (error) {
-				console.error(`Error for updates promise: ${error}`);
-				initError = true;
-				loading = false;
-				abort = false;
-				return;
-			}
-			if (updatesResponse.error) {
-				errorNotification = updatesResponse.error;
-				loading = false;
-				disabled = false;
-				abort = false;
-				return;
-			}
-			updates = updatesResponse.updates;
-			abort = false;
-		}
+		// Update checks are explicit; opening the toolbar must never wait for network.
 
 		// start async check
 		installCheck(currentTab);
@@ -399,11 +442,18 @@
 			if (!res.ok) throw new Error(`httpcode-${res.status}`);
 		} catch (error) {
 			console.error("Error fetching .user.js url", error);
-			errorNotification = `Userscript fetching failed (${res.status})`;
+			errorNotification = `Userscript fetching failed (${res?.status ?? "network error"})`;
 			showInstallPrompt = undefined;
 			return;
 		}
-		const content = await res.text();
+		let content = await res.text();
+		const header = parse(content);
+		if (header && !header.metadata.updateURL && !header.metadata.downloadURL)
+			content = content.replace(
+				"// ==/UserScript==",
+				`// @downloadURL ${res.url || url.href}\n// ==/UserScript==`,
+			);
+		if (res.url) url = new URL(res.url);
 		// caching script data
 		checkedUserscript = { tab: currentTab, url, type: "js", content };
 		// send native swift a message, parse metadata and check if installed
@@ -479,13 +529,32 @@
 	});
 
 	// handle native app messages
-	const port = connectNative();
-	port.onMessage.addListener((message) => {
-		// console.info(message); // DEBUG
-		if (message.name === "SAVE_LOCATION_CHANGED") {
-			window.location.reload();
-		}
-	});
+	let port;
+	try {
+		port = connectNative();
+		port.onMessage.addListener((message) => {
+			// console.info(message); // DEBUG
+			if (message.name === "SAVE_LOCATION_CHANGED") {
+				window.location.reload();
+			}
+		});
+	} catch (error) {
+		errorNotification = String(error.message ?? error);
+	}
+	onDestroy(() => port?.disconnect());
+
+	async function gotoSettings() {
+		await openExtensionPage();
+		const url = browser.runtime.getURL(extensionPaths.page);
+		const tabs = await browser.tabs.query({});
+		const page = tabs.find((tab) => tab.url?.startsWith(url));
+		if (page)
+			await browser.tabs.update(page.id, {
+				url: `${url}#state=settings`,
+				active: true,
+			});
+		window.close();
+	}
 
 	async function gotoExtensionPage() {
 		await openExtensionPage();
@@ -498,6 +567,8 @@
 	 */
 	let showBetaNews = true;
 </script>
+
+<svelte:window on:keydown={accessKey} />
 
 {#if showUpdates}
 	<View
@@ -524,6 +595,7 @@
 	>
 		<InstallView
 			userscript={installViewUserscript}
+			sourceURL={checkedUserscript?.url?.href ?? ""}
 			installError={installViewUserscriptError}
 			installCancelClick={() => (showInstall = false)}
 			installConfirmClick={installConfirm}
@@ -543,29 +615,33 @@
 	</View>
 {:else}
 	<div class="header" bind:this={header}>
+		<div class="site-heading">
+			<strong>{currentHost || "当前网页"}</strong><span
+				>Userscripts Enhanced</span
+			>
+		</div>
+		{#if items.length > 5}<input
+				class="script-search"
+				type="search"
+				aria-label="Search scripts"
+				placeholder="Search scripts"
+				bind:value={scriptSearch}
+			/>{/if}
 		<div class="buttons">
-			<IconButton
-				icon={iconOpen}
-				title="Open save location"
-				on:click={openSaveLocation}
-				{disabled}
-			/>
-			<IconButton
-				icon={iconUpdate}
-				infoDot={!!updates.length}
-				on:click={() => (showUpdates = true)}
-				title="Show updates"
-				{disabled}
-			/>
+			<span class="section-label">{items.length} 个匹配脚本</span>
+			{#if updates.length}<button
+					class="link"
+					on:click={() => (showUpdates = true)}>更新 {updates.length}</button
+				>{/if}
 			<IconButton
 				icon={iconRefresh}
 				on:click={refreshView}
-				title="Refresh view"
-				{disabled}
+				title="刷新"
+				disabled={loading}
 			/>
 			<Toggle
 				checked={active}
-				title="Toggle injection"
+				title="启用脚本运行"
 				on:click={toggleExtension}
 				{disabled}
 			/>
@@ -573,7 +649,7 @@
 		{#if !active}
 			<!-- <div class="warn" bind:this={warn}>Injection disabled</div> -->
 		{/if}
-		{#if showBetaNews && platform !== "macos"}
+		{#if showBetaNews && platform && platform !== "macos"}
 			<div class="warn">
 				NEW: <button on:click={gotoExtensionPage}><b>Settings page</b></button>
 				is now available!
@@ -630,30 +706,73 @@
 			<div class="none">No matched userscripts</div>
 		{:else}
 			<div class="items" class:disabled>
-				{#each list as item, i (item.filename)}
-					<PopupItem
-						background={getItemBackgroundColor(list, i)}
-						enabled={!item.disabled}
-						name={item.name}
-						subframe={item.subframe}
-						type={item.type}
-						request={!!item.request}
-						on:click={() => toggleItem(item)}
+				{#if selectedItem}
+					<ScriptCommands
+						item={selectedItem}
+						detail={true}
+						groups={active
+							? menuGroups.filter(
+									(group) => group.filename === selectedItem.filename,
+								)
+							: []}
+						toggle={() => toggleItem(selectedItem)}
+						back={() => (selectedFilename = "")}
+						preferences={(selectedItem?.scriptId &&
+							scriptPrefs[selectedItem.scriptId]) ||
+							{}}
+						setPreference={(key, value) =>
+							setScriptPreference(selectedItem, key, value)}
+						openInManager={() => openScriptInManager(selectedItem)}
+						reloadPage={reloadCurrentTab}
+						refresh={refreshCommands}
+						{disabled}
 					/>
-				{/each}
+				{:else}
+					{#each list as item (item.filename)}
+						<ScriptCommands
+							{item}
+							groups={active
+								? menuGroups.filter((group) => group.filename === item.filename)
+								: []}
+							toggle={() => toggleItem(item)}
+							open={() => (selectedFilename = item.filename)}
+							refresh={refreshCommands}
+							{disabled}
+						/>
+					{/each}
+				{/if}
 			</div>
 		{/if}
 	</div>
 	{#if !inactive && platform === "macos"}
 		<div class="footer">
-			<button class="link" on:click={gotoExtensionPage}>
-				Open Extension Page
-			</button>
+			<button class="link" on:click={openSaveLocation}>目录</button>
+			<button class="link" on:click={gotoExtensionPage}> 管理脚本 </button>
+			<button class="link" on:click={gotoSettings}>设置</button>
 		</div>
 	{/if}
 {/if}
 
 <style>
+	.site-heading {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		padding: 0.75rem 1rem 0.25rem;
+	}
+
+	.site-heading span {
+		color: var(--text-color-disabled);
+		font: var(--text-small);
+		overflow-wrap: anywhere;
+	}
+
+	.script-search {
+		box-sizing: border-box;
+		margin: 0.5rem 1rem;
+		width: calc(100% - 2rem);
+	}
+
 	.header {
 		background-color: var(--color-bg-secondary);
 		position: sticky;
@@ -662,30 +781,17 @@
 	}
 
 	.header .buttons {
+		gap: 16px;
 		align-items: center;
 		border-bottom: 1px solid var(--border-color);
 		display: flex;
 		padding: 0.5rem 1rem calc(0.5rem - 1px);
 	}
 
-	.header .buttons :global(button:nth-of-type(2)) {
-		margin: 0 auto 0 1rem;
-	}
-
-	.header .buttons :global(button:nth-of-type(3)) {
-		margin-right: 1rem;
-	}
-
-	.header .buttons :global(button:nth-of-type(1) svg) {
-		transform: scale(0.75);
-	}
-
-	.header .buttons :global(button:nth-of-type(2) svg) {
-		transform: scale(0.9);
-	}
-
-	.header .buttons :global(button:nth-of-type(4)) {
-		--toggle-font-size: 1.25rem;
+	.section-label {
+		flex: 1;
+		color: var(--text-color-secondary);
+		font-size: 12px;
 	}
 
 	.error,
@@ -752,6 +858,8 @@
 	}
 
 	.footer {
+		display: flex;
+		justify-content: space-around;
 		border-top: 1px solid var(--border-color);
 		font-weight: 600;
 		line-height: 1.5rem;

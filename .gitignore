@@ -56,3 +56,5 @@ local
 # fastlane
 /fastlane/report.xml
 /fastlane/**/*.local.rb
+# Local build products and measurements
+/artifacts/

@@ -8,18 +8,18 @@
 </script>
 
 {#if updates.length}
-	{#each updates as item (item.name)}
+	{#each updates as item (item.filename)}
 		<!-- {#each Array(10) as _, i} -->
 		<div class="item">
 			<div class="truncate">{item.name}</div>
 			<a href={item.url} target="_blank"> Source </a>
 			<button class="link" on:click={() => updateSingleClick(item)}>
-				Update
+				Review
 			</button>
 		</div>
 	{/each}
 	<p>Be sure you trust the author before saving remote code to your device.</p>
-	<button class="link" on:click={updateClick}> Update All </button>
+	<button class="link" on:click={updateClick}> Review Updates </button>
 {:else}
 	<div class="none">
 		<!-- eslint-disable-next-line svelte/no-at-html-tags -->

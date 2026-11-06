@@ -1,391 +1,87 @@
-# Userscripts Safari
+# Userscripts Enhanced 0.1.0 — 开发预览
 
-An open-source userscript editor for Safari
+基于 [quoid/userscripts](https://github.com/quoid/userscripts)，锁定上游 Commit `8b743e37dd7dfc8a510aff4e5e2ab8b1cc9210df`。沿用 Svelte、Vite、CodeMirror、Swift 和 Manifest V2，许可证保持 GPL-3.0。
 
-![Userscripts Safari](/etc/screenshot.png)
+**当前不是完整兼容、可安全日用的正式版。Build 5 发现隔离 realm 可经 iframe 的 `top` 直达扩展 API，隔离门禁失败（见安全模型）：只安装你信任的脚本。不得将构建成功或模拟消息测试当作 Safari 验收通过。**
 
-## Table of Contents
+## Build 5：脚本兼容与弹窗设置
 
-- [Installation](#installation)
-- [Usage](#usage)
-- [UI Overview](#ui-overview)
-  - [Browser Page](#browser-page)
-  - [Settings Modal](#settings-modal)
-  - [Popover](#popover)
-- [Metadata](#metadata)
-- [API](#api)
-- [Scripts Directory / Save Location](#scripts-directory)
-- [Getting Help](#getting-help)
-- [FAQs](#faqs)
-- [Contributing](#contributing)
-- [Support](#support)
-- [Privacy Policy](#privacy-policy)
-- [License](#license)
+- 修复 Build 4 沙箱中 `window.top !== window.self` 恒为真（Click Fx、Boss Key 等脚本因此直接退出、不注册任何菜单）及 `location` 不随单页应用导航更新。
+- 修复脚本向 `postMessage`、`structuredClone`、`history.pushState` 等传普通对象时的 DataCloneError。
+- 弹窗脚本详情新增“脚本设置”：允许自动弹出页面面板（经 `GM_info.preferences.autoPopup` 传给脚本）、在管理页中打开此脚本、刷新网页；无操作的脚本会说明原因。
+- `@inject-into page` 脚本可注册工具栏菜单命令。
+- 新增 `tests/user-scripts-webkit.js`：用生产入口在真实 WebKit 中运行 `tests/local/final-scripts` 下的脚本，报告错误、已注册菜单和 DOM 效果。
 
-## Installation
+## Build 4：脚本隔离
 
-Userscripts is available for iOS (iPadOS) and macOS. For all versions, installation is done through [Apple's App Store](https://itunes.apple.com/us/app/userscripts/id1463298887). On macOS, versions prior to `4.x` were made available to download and install directly from the repository, but due to [changes in the way Apple allows developers to distribute apps built with the WebExtension API](https://github.com/quoid/userscripts/issues/154), that is no longer an option.
+每个有权限脚本使用独立 realm 和 DOM 膜，GM/UE 能力按 grant 传入；禁止直接扩展 API 和外部 Window。详情及限制见 [安全模型](docs/security-model.md)。
 
-To run Userscripts on iOS you should be on iOS 15.1 or higher.
+## Build 3：弹窗与脚本接口
 
-To run Userscripts on macOS you should running macOS 12 or higher, along with Safari 14.1 or higher.
 
-**[App Store Link](https://itunes.apple.com/us/app/userscripts/id1463298887)**
+## 已接通的功能
 
-**[Development Progress](https://github.com/quoid/userscripts/projects/3)**
+- Safari 工具栏菜单：同步/Promise 注册、注销、标题更新、同名命令、异步回调、错误反馈、重复点击保护。
+- 完整 tab/frame/document/script/command 路由；后台重启从存活 frame 的索引恢复，不传输函数、不轮询 DOM。
+- 稳定 UUID（编辑器内改名保留）、namespace 文件冲突处理；网页中不注入管理器控制入口。
+- 同步缓存存储、持久化 Promise 存储、跨标签页监听；同步写入为 write-behind，详见 API 限制。
+- 有 `@connect`/宿主权限检查的网络请求、终止、超时、进度；拒绝无法逐跳授权的重定向。
+- 样式、元素、日志、脚本信息、标签页控制/数据、剪贴板反馈、资源文本/data URL 与完整性检查。
+- 安装预览、URL/文件/拖放/批量导入、全体启停、JSON 备份、冲突预览、源码恢复事务。
+- 更新候选审批与回滚；使用 Safari alarms 调度检查和失败退避，默认不自动安装。明确启用后，只自动应用声明未变化的更新。
+- 独立 Bundle ID、App Group、URL Scheme 和签名设置；Debug 与 Release 也分开。
 
-## Usage
+这些条目表示有真实执行路径，覆盖和验收状态以 [逐项验收](docs/acceptance.md) 为准。
 
-It's recommend to read this documentation and, if you have time, watch the following video overviews to familiarize yourself with the app and extension.
+## 本机位置
 
-Once the app is downloaded and installed the following steps should be taken:
+维护中的工程：`Userscripts-Enhanced`。原工作区的 `Userscripts-Enhanced-local` 链接指向它。桌面原 `Userscripts-Enhanced` 目录保留初期审计副本和完整上游历史，请勿继续在该旧副本编辑。
 
-### **iOS (iPadOS)**
+Xcode 工程：`xcode/Userscripts.xcodeproj`，Scheme `Mac`。独立 Debug 应用安装位置：`~/Applications/Userscripts Enhanced Debug.app`。
 
-After installing the iOS App, you need two main steps to make the extension work:
+```sh
+npm ci
+npm run build:mac-safari-16.4
+./scripts/build-enhanced.sh Debug
+```
 
-- **Open the App and set a directory** (For saving and loading userscripts)
-  - After Userscripts for ios v1.5.0, a local default directory will be set automatically
-  - In earlier versions please click the `Set Userscripts Directory` button and select the directory
-- **Enable the extension in Safari** (And grant permissions)
+本机已配置现有开发证书的 Team（忽略的 `xcode/xcconfig/Userscripts-Enhanced.dev.xcconfig`）。其他机器应按 [构建指南](docs/build-guide.md) 配置自己的 Team，不能复制签名私钥。
 
-  - Manage extensions from Settings App (Settings > Safari > Extensions) or Safari App (`AA` button on iPhone, `extension-icon` on iPad, also where you open the extension's `popup` interface)
-  - For optimal experience it's recommended that you `Always Allow` Userscripts for `All Websites`
+```sh
+npm run lint:js
+npm run lint:css
+npm test
+./scripts/test-native.sh
+npm run test:performance
+npm run audit:sandbox
+```
 
-> [!NOTE]
->
-> The iOS App cannot detect whether you have enabled the extension in Safari, therefore, the App prompt will not change after you enable the extension. Currently the App interface is only used to set or change the userscripts directory.
->
-> You could select an iCloud folder for syncing scripts between macOS and iOS, but please note that there may be delays in synchronization, and you may encounter files be evictioned due to iCloud optimization, please refer to [#424](https://github.com/quoid/userscripts/issues/424). (**Since macOS 15 / iOS 18, please set "keep downloaded" for the folder to avoid eviction**)
-
-There are two main ways to install a user script from the iOS version:
-
-- Visit a `.user.js` URL in Safari, then open the extension `popup` and you will see an installation prompt
-  - The URL should end with `.user.js` in `/PATH` part, not the `?QUERY` or `#HASH` parts
-- You could also save files with the extension `.user.js` directly to the Userscripts directory you set above
-
-> [!TIP]
->
-> Both of the above work equally well in the macOS version.
->
-> The iOS version does not include the script editor provided in the macOS version, but you can always edit script files in the directory you set directly on iOS. (use any third-party code editor apps, support in-place opening and editing)
-
-### **macOS**
-
-After installing Userscripts on macOS, you **do not** need to select a userscripts directory if you do not plan on syncing your userscripts between multiple devices. Instead you can choose to use the default directory, which is located at `~/User/Library/Containers/Userscripts/Data/Documents/scripts` - again, this is default (and automatic) behavior. You only need to select a new location if you want to store your userscripts elsewhere, which is especially useful if you are using an external code editor such as Sublime Text or VSCode.
-
-Refer to Apple's official guide page: [Use Safari extensions on your Mac](https://support.apple.com/102343)
-
-[**Here's a short clip showing how to easily create/add a userscript in Safari using this extension on macOS**](https://youtu.be/x1r3-L7pdYQ?t=14)
-
-## UI Overview
-
-### Browser Page:
-
-![Userscripts Safari Main Application Window](/etc/ui01.png)
-
-1. **Extension button** - click this button to open the extension interface
-1. **Filter bar** - use this input to filter items in the sidebar, by _name_
-1. **Sort button** - changes the order of the items in the sidebar by name or modified time
-1. **Sidebar buttons** - _described left to right_
-   - The `settings` button (represented by a [cog](https://wikipedia.org/wiki/Gear)) displays the settings modal (discussed below)
-   - The `plus` button allows users to add new items
-     - `New CSS` is a "userscript" that expects [CSS](https://www.w3schools.com/css/) code
-     - `New Javascript` is a prototypical userscript that expects [Javascript](https://www.w3schools.com/js/DEFAULT.asp) code
-     - `New Remote` allows the user to add a remote hosted userscript (or style) by inputting the web address (_ex:_ `https://www.k21p.com/example.user.js`)
-1. **Item toggle** - this toggle enables or disables an item
-1. **Item** - this is the userscript (or style), clicking on it will load it's contents into the editor - _you can hide descriptions in the settings area!_
-1. **Editor buttons (top)** - _described left to right_
-   - **Update button** - this button allows you to update userscripts that meet the following conditions
-     - metadata contains `@version` tag
-     - metadata contains `@updateURL` tag
-   - **Download button** - click this button to download a copy of your userscript
-     - _Note:_ every userscript that is displayed in the interface is already present on your local machine, at your save location - the download button offers a quick way to retrieve a copy of that file, without needing to click the settings button, and then the save location link within the settings modal
-   - **Trash button** - moves the currently loaded userscript to the trash bin - it will subsequently be removed from the interface and save location
-1. **Editor buttons (bottom)**
-   - `Discard` - while editing, reverts any unsaved changes you've made to a userscript
-   - `Save` - while editing, saves all changes you've made to a userscript
-     - `Command + S` is the keyboard shortcut for the action
-
-### Settings Modal:
-
-![Userscripts Safari Settings Window](/etc/settings.png)
-
-- **Auto Close Brackets** - toggles on/off auto closing of brackets in the editor
-  - this affects the following characters: `() [] {} "" ''`
-- **Auto Hint** - automatically shows completion hints while editing
-- **Hide Descriptions** - hides the item descriptions in the sidebar
-- **Show Invisibles** - toggles the display of invisible characters in the editor
-- **Javascript Linter** - toggles basic Javascript linting within the editor
-- **Tab Size** - the number of spaces a tab is equal to while editing, obviously defaults to `4` because using `2` spaces is absolute insanity
-- **Enable Injection** - toggle on/off script injection for the pages you visit (this is the on/off switch)
-- **Show Toolbar Count** - displays a badge on the toolbar icon with a number that represents how many enabled scripts match the url for the page you are on
-- **Save Location** - where your file are currently located and being saved to (click the blue text to open location)
-- **Change Save Location (cogs icon)** - this button, located directly to the right of the save location, is a shortcut for opening the host app, which will allow you to change the save location
-- **Global Blacklist** - this input accepts a comma separated list of `@match` patterns ([Match pattern structure](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns#match_pattern_structure)), a page url that matches against a pattern in this list will be ignored for script injection
-
-### Popup:
-
-<!-- ![Userscripts Popup](/etc/popover.png)-->
-
-<img src="/etc/popover.png" width="50%" height="50%">
-
-10. **Open Page Link** - _macOS only_, opens the extension browser page
-11. **Enable Injection toggle** - turns on/off page script injection (on/off switch)
-12. **Refresh View** - refreshes the popup view
-13. **Available Updates View** - the extension periodically checks all userscripts in your save location for updates and when an update is found, it is shown in this view
-14. **Folder Button** - on **macOS** this button opens your save location directory in Finder, on **iOS** this button displays the "all scripts view" where you can see every script that found in your save location directory, the "all scripts view" allows you to toggle individual userscript scripts on/off regardless of the current page being displayed in the browser
-15. **Install Prompt** - when a userscript is displayed in the browser, this alert displays, giving the user the option to install the userscript into their save location directory, tapping the prompt will take them through the installation steps
-16. **Matched Userscripts List** - this list shows the currently matched userscripts relative to the current page being displayed in the browser, all userscripts that match to the domain will be showed, whether they are active or not. Users can click/tap the userscript to the toggle them on/off. If a userscript is active for the domain through a subframe a **sub** tag will be show next the to the file type indicator
-
-## Metadata
-
-Userscripts Safari currently supports the following userscript metadata:
-
-- `@name` - This will be the name that displays in the sidebar and be used as the filename - you can _not_ use the same name for multiple files of the same type
-- `@description`- Use this to describe what your userscript does - this will be displayed in the sidebar - there is a setting to hide descriptions
-- `@icon` - This doesn't have a function with this userscript manager, but the **first value** provided in the metadata will be accessible in the `GM_/GM.info` object
-- `@match` - Domain match patterns - you can use several instances of this field if you'd like multiple domain matches - please refer to: [Match pattern structure](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns#match_pattern_structure)
-  - **Note:** this extension only supports `http/s`
-- `@exclude-match` - Domain patterns where you do _not_ want the script to run
-- `@include` - Used to match against urls for injection, globs and regular expressions are allowed, [read more here](https://wiki.greasespot.net/Include_and_exclude_rules)
-- `@exclude` - Functions in a similar way as `@include` but rather than injecting, a match against this key's value will prevent injection
-- `@inject-into` - allows the user to choose which context to inject the script into
-  - allows the user to choose which context to inject the script into
-  - values: `auto` (default), `content`, `page`
-    - `GM` apis are only available when using `content`
-  - works like [violentmonkey](https://violentmonkey.github.io/api/metadata-block/#inject-into)
-- `@run-at`
-  - allows the user to choose the injection timing
-  - document-start, document-end (default), document-idle
-  - works like [violentmonkey](https://violentmonkey.github.io/api/metadata-block/#run-at)
-  - **JS Only**
-- `@weight`
-  - allows the user to further adjust script injection timing
-  - can be used to ensure one script injects before another
-  - ONLY accepts integers (floats, strings and everything else will be ignored)
-  - min value = 1, max value = 999, higher numbers (“heavier”) execute earlier
-- `@require`
-  - allows users to include remote resources in their scripts
-  - the value must be a valid url, currently no local file support
-  - must require a resource of the same file type (JS for JS, CSS for CSS)
-  - when a resource is required, it is downloaded and saved locally
-  - the resources is downloaded once at save and never checked for updates or parsed in anyway
-    - if you want to update the require resources, and the url does not change, you must remove the resources, save, then re-input it
-  - **require remote resources at your own risk, the extension never validates remote resource code in any way and be aware that using remote resources from untrusted sources can jeopardize your personal security**
-- `@version`
-  - used to determine the current version of a userscript
-  - when paired with `@updateURL`, this will allow the user to update a userscript from a remote source, if the version on their machine is `<` version at the update URL
-  - `@version` does nothing by itself, it needs to be paired with` @updateURL` for remote updating to function properly
-- `@updateURL`
-  - the remote url to check version against, the url `/PATH` should end with `.meta.js` and contains the Metadata block
-  - if the version of the file located at the update URL is `>` the version on the local machine, the file will be updated
-  - `@updateURL` does nothing by itself, it needs to be paired with `@version` for remote updating to function properly
-  - Read this [link](https://stackoverflow.com/questions/38023717/) for more details
-  - _Note: The extension does not correctly implement the entire update process, tracking in issue [#248](https://github.com/quoid/userscripts/issues/248)_
-- `@downloadURL`
-  - the url `/PATH` should end with `.user.js`, that is, it cannot be in `?QUERY` or `#HASH` parts
-  - optional download location for a remotely updateable file (\*i.e. a file that has both `@version` and `@updateURL`)
-  - when paired with `@version` and `@updateURL`, if the local version is `<` the version of the file that `@updateURL` points to, the extension will attempt to update the file's code with the contents of the file located at the `@downloadURL`
-  - `@downloadURL` does nothing by itself, it needs `@version` and `@updateURL` to present in order to function properly
-- `@noframes`
-  - this key takes no value
-  - prevents code from being injected into nested frames
-- `@grant`
-  - Imperative controls which special [`APIs`](#api) (if any) your script uses, one on each `@grant` line, only those API methods will be provided.
-  - If no `@grant` values are provided, `none` will be assumed.
-  - If you specify `none` and something else, `none` takes precedence.
-
-**All userscripts need at least 1 `@match` or `@include` to run!**
-
-## API
-
-Userscripts currently supports the following api methods. All methods are asynchronous unless otherwise noted. Users must `@grant` these methods in order to use them in a userscript. When using API methods, it's only possible to inject into the content script scope due to security concerns.
-
-> [!NOTE]
->
-> The following API description applies to the latest development branch, you may need to check the documentation for the corresponding version. Please switch to the version you want to check via `Branches` or `Tags` at the top. For example:
->
-> For the current version of the App Store:
-> https://github.com/quoid/userscripts/tree/release/4.x.x#api
->
-> For the v4.5.x and earlier versions:
-> https://github.com/quoid/userscripts/tree/v4.5.4#api
-
-For API type definitions, please refer to: [`types.d.ts`](https://github.com/userscriptsup/testscripts/blob/f2fcde4b556fa436fe806a44a89afb9eb5dccd0b/userscripts/types.d.ts)
-
-- `GM.addStyle(css)`
-  - `css: String`
-  - returns a [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise), resolved if succeeds, rejected with error message if fails
-- `GM.setValue(key, value)`
-  - `key: String`
-  - `value: Any` - any can be JSON-serialized
-  - returns a [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise), resolved if succeeds, rejected with error message if fails
-- `GM.getValue(key, defaultValue)`
-  - `key: String`
-  - `defaultValue: Any` - optional
-  - returns a [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise), resolved with the `value` that was set or `defaultValue` provided or `undefined` if succeeds, rejected with error message if fails
-- `GM.deleteValue(key)`
-  - `key: String`
-  - returns a [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise), resolved if succeeds, rejected with error message if fails
-- `GM.listValues()`
-  - returns a [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise), resolved with an array of the key names of **presently set** values if succeeds, rejected with error message if fails
-- `GM.getTab()`
-  - returns a [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise), resolved with `Any` data that is persistent as long as this tab is open if succeeds, rejected with error message if fails
-- `GM.saveTab(tabObj)`
-  - `tabObj: Any` - any can be JSON-serialized
-  - returns a [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise), resolved if succeeds, rejected with error message if fails
-- `GM.openInTab(url, openInBackground)`
-  - `url: String`
-  - `openInBackground: Bool` - optional, `false` by default
-  - returns a [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise), resolved with [tab data](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/Tab) for the tab just opened if succeeds, rejected with error message if fails
-- `GM.closeTab(tabId)`
-  - `tabId: Int` - optional, the `caller tab` by default
-  - returns a [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise), resolved if succeeds, rejected with error message if fails
-- `GM.setClipboard(data, type)`
-  - `data: String`
-  - `type: String` - optional, `text/plain` by default
-  - [read more here](https://developer.mozilla.org/en-US/docs/Web/API/ClipboardEvent/clipboardData)
-  - returns a [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise), resolved with a `Bool` value indicating succeeds or fails, rejected with error message if fails
-- `GM.info` && `GM_info`
-  - is available without needing to add it to `@grant`
-  - an object containing information about the running userscript
-    - `scriptHandler: String` - returns `Userscripts`
-    - `version: String` - the version of Userscripts app
-    - `scriptMetaStr: String` - the metablock for the currently running script
-    - `script: Object` - contains data about the currently running script
-      - `description: String`
-      - `exclude-match: [String]`
-      - `excludes: [String]`
-      - `grant: [String]`
-      - `includes: [String]`
-      - `inject-into: String`
-      - `matches: [String]`
-      - `name: String`
-      - `namespace: String`
-      - `noframes: Bool`
-      - `require: [String]`
-      - `resources: [String]` - _currently not implemented_
-      - `run-at: String`
-      - `version: String` - _the userscript version value_
-- `GM.xmlHttpRequest(details)`
-  - `details: Object`
-  - the `details` object accepts the following properties
-    - `url: String` - required
-    - `method: String` - optional, `GET` by default
-    - `user: String` - optional
-    - `password: String` - optional
-    - `headers: Object` - optional
-    - `overrideMimeType: String` - optional
-    - `timeout: Int` - optional
-    - `binary: Bool` - optional (Deprecated, use binary data objects such as `Blob`, `ArrayBuffer`, `TypedArray`, etc. instead.)
-    - `data: String | Blob | ArrayBuffer | TypedArray | DataView | FormData | URLSearchParams` - optional
-    - `responseType: String` - optional
-    - refer to [`XMLHttpRequests`](https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest)
-  - upload event handlers:
-    - `upload: Object` - optional
-      - `onabort: Function` - optional
-      - `onerror: Function` - optional
-      - `onload: Function` - optional
-      - `onloadend: Function` - optional
-      - `onloadstart: Function` - optional
-      - `onprogress: Function` - optional
-      - `ontimeout: Function` - optional
-      - the progress object passed to the event handlers has the following properties:
-        - `lengthComputable`
-        - `loaded`
-        - `total`
-  - event handlers:
-    - `onabort: Function` - optional
-    - `onerror: Function` - optional
-    - `onload: Function` - optional
-    - `onloadend: Function` - optional
-    - `onloadstart: Function` - optional
-    - `onprogress: Function` - optional
-    - `onreadystatechange: Function` - optional
-    - `ontimeout: Function` - optional
-    - the response object passed to the event handlers has the following properties:
-      - `readyState`
-      - `response`
-      - `responseHeaders`
-      - `responseType`
-      - `responseURL`
-      - `status`
-      - `statusText`
-      - `timeout`
-      - `responseText` (when `responseType` is `text`)
-  - returns a custom [`Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise) contains an additional property `abort`, resolved with the response object.
-    - usage:
-      - `const xhr = GM.xmlHttpRequest({...});`
-      - `xhr.abort();` to abort the request
-      - `const response = await xhr;`
-    - or just:
-      - `const response = await GM.xmlHttpRequest({...});`
-- `GM_xmlhttpRequest(details)`
-  - Basically the same as `GM.xmlHttpRequest(details)`, except:
-  - returns an object with a single property, `abort`, which is a `Function`
-    - usage: `const foo = GM.xmlHttpRequest({...});` ... `foo.abort();` to abort the request
-
-## Scripts Directory
-
-This is the directory where the app/extension will read from and write to. This directory is changed by opening the **containing app** and clicking the respective "change location" button.
-
-**Script Directory Notes**
-
-- Close all instances of the extension UI (browser app and/or popup) before changing the scripts directory
-- After files are added, removed or edited, you will need to open the popup at least 1 time to see those changes reflected in your browsing experience
-- **On macOS**, after a directory outside of the default is selected, if you rename or move that selected directory, the extension will continue to read/write to that directory - the only way to remove the “link” is by trashing the folder or selecting a new save location
-
-## Getting Help
-
-If you encounter a problem while using this app/extension or are in need of some assistance, please open an issue here in the repository. When doing so, please provide as much detail as possible. This includes listing system specs and what website and script you are trying to execute. _Please follow the issue template!_
-
-## FAQs
-
-**"Refused to execute a script" error(s), what should I do!?**
-
-> You are seeing this error because of the website's [Content Security Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP). Currently there is no way to allow extension content scripts to bypass CSPs in Safari.
->
-> Automatically, the extension will attempt to circumvent strict CSPs, but if you are still experiencing issues, trying setting the userscript metadata key/val `// @inject-into auto` or `// @inject-into content`.
->
-> You can read more about this in [this issue](https://github.com/quoid/userscripts/issues/106#issuecomment-797320450).
-
-**Do I need to use the extension's editor to create new userscripts or to edit existing?**
-
-> You can use your own editor to update and manage your files. As long as you are saving the files to the save location, and they are properly formatted, they should be injected. However, you **must open the extension popup** beforehand. That means, if you create a new or edit an existing userscript with an external editor and save it to the save location, before injection will occur properly, the extension popup must be opened and the popup must load completely.
-
-**What are the keyboard shortcuts?**
-
-> Whilst using the included editor, clicking `⌘ + s` will save the file. While working the editor, clicking `⌘ + f` will bring up the search bar and `esc` will hide it.
-
-**When I use `@require`, where are the required files stored?**
-
-> All required files are saved _as Javascript files_ in the extension container folder in macOS 11.x. That folder is located in the default save location, at: `~/Library/Containers/Userscripts/Data/Documents/require/`.
->
-> If you move files from the require folder or manually edit the `manifest.json` file, you will likely break app/extension functionality.
-
-## Contributing
-
-Code level contributions please refer to [contributing.md](docs/contributing.md)
-
-Further, any issue marked "help wanted" is actively seeking assistance. Please respond to those issues with feedback, guidance or offers of coding assistance.
-
-Participating and interacting with any existing [`Issues`](https://github.com/quoid/userscripts/issues) or [`Discussions`](https://github.com/quoid/userscripts/discussions) would be a great help to the project and open source communities. Thank you for your contributions.
-
-## Support
-
-The quickest and easiest way to support the project is by [leaving a positive review on the App Store](https://apps.apple.com/us/app/userscripts/id1463298887) if you enjoy the extension and want to see future improvements. Seeing these reviews let me know I am doing something right, or wrong, and motivates me to continue working on the project.
-
-The second best way to help out is to sign up to beta test new versions of the app. Since this extension values your privacy, and **does not collect any data from users**, it is difficult to gauge how the extension is being used. By signing up to be a beta tester it not only allows you to test upcoming features, but also gives me the opportunity to elicit direct feedback from real users.
-
-**Please join and test the corresponding beta version in [releases](https://github.com/quoid/userscripts/releases) via the TestFlight public link.**
-
-## Privacy Policy
-
-Userscripts does not collect any data from its users nor monitor activities or actions you perform within the application and extension. This means everything that you do with the application and extension is private to you and is never shared with the developers or third parties. Since there is no data collection, there is no data retention of any kind.
-
-## License
-
-Copyright © 2018-2025 Justin Wasack
-
-Licensed under the [GNU General Public License v3.0](/LICENSE) license for all open source applications. A commercial license is required for all other applications.
+`audit:sandbox` 与 `audit:sandbox:webkit` 检查真实 DOM 膜、逃逸攻击、负对照与正向功能，均纳入 `npm run verify`。WebKit 测试使用合成扩展 API，不冒充 Safari 扩展端到端验收。
+
+## Safari 回归
+
+先阅读 [安全模型](docs/security-model.md)。系统权限由用户本人确认；本项目没有更改 Safari 安全开关、Gatekeeper 或原版应用。
+
+```sh
+npm run test:serve
+```
+
+打开 `http://localhost:8173`，优先使用页面中的用户提供 SpeedMaster 4.1 工具栏适配版/API 样例。适配版、未改动原版及早期原创样例分别标注，见 [SpeedMaster 回归](docs/speedmaster-regression.md)；当前尚未完成 Safari 真机验证。停止测试服务器使用 Ctrl+C。
+
+## 文档
+
+- [架构与基线审计](docs/architecture.md)
+- [完整兼容性矩阵](docs/compatibility-matrix.md)
+- [GM API 支持与语义](docs/gm-api-support.md)
+- [安全模型与阻塞项](docs/security-model.md)
+- [迁移与恢复](docs/migration.md)
+- [测试方法及记录](docs/testing.md)
+- [SpeedMaster 4.1 来源、适配与回归](docs/speedmaster-regression.md)
+- [构建及安装](docs/build-guide.md)
+- [初始化卡住修复与证据](docs/native-startup-fix.md)
+- [验收清单](docs/acceptance.md)
+- [维护路线](docs/maintenance.md)
+- [实际运行时测量](docs/reports/performance.md)
+- [原版 README](docs/upstream-README.md)
+
+构建或安装前须完全退出 Safari（Command-Q）。Xcode 会自动登记构建产物，构建脚本在成功验证后撤销该副本的登记；安装脚本只登记 Applications 副本，避免同标识版本并用。不要在 Safari 运行期间直接用 Xcode 替换这份日用安装；需要 Xcode 联调时先退出 Safari，并明确选定唯一运行副本。

@@ -1,3 +1,4 @@
+import { parseHeader } from "./metadata.js";
 /**
  * @param {number} ms millisecond timestamp
  * @returns {string}
@@ -67,43 +68,7 @@ export function newScriptDefault(description, name, type) {
  * @returns {?{code: string, content: str, metablock: string, metadata: object}}
  */
 export function parse(str) {
-	if (typeof str != "string") return null;
-	const blocksReg =
-		/(?:(\/\/ ==UserScript==[ \t]*?\r?\n([\S\s]*?)\r?\n\/\/ ==\/UserScript==)([\S\s]*)|(\/\* ==UserStyle==[ \t]*?\r?\n([\S\s]*?)\r?\n==\/UserStyle== \*\/)([\S\s]*))/;
-	const blocks = str.match(blocksReg);
-
-	if (!blocks) return null;
-
-	const metablock = blocks[1] != null ? blocks[1] : blocks[4];
-	const metas = blocks[2] != null ? blocks[2] : blocks[5];
-	const code = blocks[3] != null ? blocks[3].trim() : blocks[6].trim();
-
-	const metadata = {};
-	const metaArray = metas.split("\n");
-	metaArray.forEach((m) => {
-		const parts = m
-			.trim()
-			.match(/^(?:[ \t]*(?:\/\/)?[ \t]*@)([\w-]+)[ \t]+([^\s]+[^\r\n\t\v\f]*)/);
-		const parts2 = m
-			.trim()
-			.match(/^(?:[ \t]*(?:\/\/)?[ \t]*@)(noframes)[ \t]*$/);
-		if (parts) {
-			metadata[parts[1]] = metadata[parts[1]] || [];
-			metadata[parts[1]].push(parts[2]);
-		} else if (parts2) {
-			metadata[parts2[1]] = metadata[parts2[1]] || [];
-			metadata[parts2[1]].push(true);
-		}
-	});
-	// fail if @name is missing or name is empty
-	if (!metadata.name || metadata.name[0].length < 2) return;
-
-	return {
-		code,
-		content: str,
-		metablock,
-		metadata,
-	};
+	return parseHeader(str);
 }
 
 /**
@@ -175,7 +140,7 @@ export function parseMatchPatterns(input) {
 		if (item.warn === true) result.warn = true;
 		if (item.error === true) result.error = true;
 		result.items.push({ ...match.groups, ...item });
-		result.values.push(match.groups.value.toLowerCase());
+		result.values.push(match.groups.value);
 	}
 	return result;
 }
@@ -326,11 +291,42 @@ export function toolsGetValidPathCharacters() {
 export const gl = (n, s = undefined) => browser.i18n.getMessage(n, s);
 
 export const validGrants = new Set([
+	"UE.registerPanel",
+	"GM_getResourceText",
+	"GM_getResourceURL",
+	"GM.getResourceText",
+	"GM.getResourceUrl",
+	"GM.getResourceURL",
+
+	"GM_openInTab",
+	"GM_getTab",
+	"GM_saveTab",
+	"GM_getTabs",
+	"GM.getTabs",
+	"GM_setClipboard",
+
+	"GM_addStyle",
+	"GM_addElement",
+	"GM.addElement",
+	"GM_log",
+	"GM.log",
+
+	"GM_getValue",
+	"GM_setValue",
+	"GM_deleteValue",
+	"GM_listValues",
+	"GM_addValueChangeListener",
+	"GM_removeValueChangeListener",
+	"GM.addValueChangeListener",
+	"GM.removeValueChangeListener",
+	"GM_registerMenuCommand",
+	"GM_unregisterMenuCommand",
+	"GM.registerMenuCommand",
+	"GM.unregisterMenuCommand",
 	"GM.info",
 	"GM_info",
 	"GM.addStyle",
 	"GM.openInTab",
-	"GM.closeTab",
 	"GM.setValue",
 	"GM.getValue",
 	"GM.deleteValue",
@@ -344,6 +340,19 @@ export const validGrants = new Set([
 ]);
 
 export const validMetaKeys = new Set([
+	"namespace",
+	"resource",
+	"connect",
+	"homepage",
+	"homepageURL",
+	"license",
+	"copyright",
+	"supportURL",
+	"source",
+	"sandbox",
+	"tag",
+	"antifeature",
+	"run-in",
 	"author",
 	"description",
 	"downloadURL",

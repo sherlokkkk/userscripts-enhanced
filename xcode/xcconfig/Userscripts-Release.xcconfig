@@ -22,5 +22,7 @@ MAC_SHARED_GID = $(DEVELOPMENT_TEAM).$(ORG_IDENTIFIER).macos
 // App URL Scheme
 APP_URL_SCHEME = userscriptsurlscheme
 
+#include "Userscripts-Enhanced.xcconfig"
+
 // Override this file
 #include? "Userscripts-Release.dev.xcconfig"

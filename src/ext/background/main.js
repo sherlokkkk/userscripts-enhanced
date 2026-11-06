@@ -1,21 +1,94 @@
+import { createUpdateService } from "./updates.js";
+import { createTabRouter } from "./tab-api.js";
+import { installNetworkHandler } from "./network.js";
+import { createMenuRouter } from "./menu-router.js";
 import { contentScriptRegistration, openExtensionPage } from "@ext/utils.js";
 import * as settingsStorage from "@ext/settings.js";
 import { connectNative, sendNativeMessage } from "@ext/native.js";
+
+async function authorizeAPI(identity, method) {
+	if (
+		(await browser.storage.local.get("US_GLOBAL_ACTIVE")).US_GLOBAL_ACTIVE ===
+		false
+	)
+		throw new Error("Userscripts Enhanced is disabled");
+	const response = await sendNativeMessage({
+		name: "UE_AUTHORIZE_API",
+		identity,
+		method,
+	});
+	if (!response?.allowed)
+		throw new Error(`Script does not have ${method} permission`);
+}
+const tabRouter = createTabRouter({ browser, authorize: authorizeAPI });
+
+installNetworkHandler({
+	browser,
+	authorize: async (identity, sender) => {
+		if (
+			(await browser.storage.local.get("US_GLOBAL_ACTIVE")).US_GLOBAL_ACTIVE ===
+			false
+		)
+			throw new Error("Userscripts Enhanced is disabled");
+		const response = await sendNativeMessage({
+			name: "UE_AUTHORIZE_XHR",
+			identity,
+			url: sender.url,
+		});
+		if (!response?.allowed)
+			throw new Error(
+				response?.error ?? "Script does not have network permission",
+			);
+		return response;
+	},
+});
+
+const updates = createUpdateService({
+	browser,
+	native: sendNativeMessage,
+	intervalDays: () => settingsStorage.get("scripts_update_check_interval"),
+	enabled: async () =>
+		(await browser.storage.local.get("US_GLOBAL_ACTIVE")).US_GLOBAL_ACTIVE !==
+		false,
+});
+
+const menuRouter = createMenuRouter({
+	browser,
+	isEnabled: async () =>
+		(await browser.storage.local.get("US_GLOBAL_ACTIVE"))[
+			"US_GLOBAL_ACTIVE"
+		] !== false,
+	validateScripts: async (scripts) => {
+		if (!scripts.length) return new Set();
+		const response = await sendNativeMessage({
+			name: "UE_VALIDATE_MENU_SCRIPTS",
+			scripts: scripts.map(({ scriptId, filename, revision }) => ({
+				scriptId,
+				filename,
+				revision,
+			})),
+		});
+		if (!Array.isArray(response?.allowed))
+			throw new Error("Could not verify script permissions");
+		return new Set(response.allowed);
+	},
+});
 
 // first sorts files by run-at value, then by weight value
 function userscriptSort(a, b) {
 	// map the run-at values to numeric values
 	const runAtValues = {
 		"document-start": 1,
-		"document-end": 2,
-		"document-idle": 3,
+		"document-body": 2,
+		"document-end": 3,
+		"document-idle": 4,
 	};
 	const runAtA = a.scriptObject["run-at"];
 	const runAtB = b.scriptObject["run-at"];
 	if (runAtA !== runAtB && runAtValues[runAtA] && runAtValues[runAtB]) {
-		return runAtValues[runAtA] > runAtValues[runAtB];
+		return runAtValues[runAtA] - runAtValues[runAtB];
 	}
-	return Number(a.scriptObject.weight) < Number(b.scriptObject.weight);
+	return Number(b.weight) - Number(a.weight);
 }
 
 async function getPlatform() {
@@ -56,6 +129,7 @@ function setClipboard(data, type = "text/plain") {
 		document.removeEventListener("copy", onCopy, true);
 		return false;
 	} finally {
+		document.removeEventListener("copy", onCopy, true);
 		document.body.removeChild(textarea);
 	}
 }
@@ -269,6 +343,62 @@ async function nativeChecks() {
  * @returns {Promise<{status: "pending"|"fulfilled"|"rejected", result?: any}>}
  */
 async function handleMessage(message, sender) {
+	if (
+		!message ||
+		typeof message !== "object" ||
+		typeof message.name !== "string"
+	)
+		return { ok: false, error: "Invalid extension message" };
+	if (message?.name === "UE_UPDATE_CHECK") {
+		const url = sender.url?.split(/[?#]/)[0];
+		if (
+			sender.id !== browser.runtime.id ||
+			![
+				browser.runtime.getURL("/dist/entry-ext-action-popup.html"),
+				browser.runtime.getURL("/dist/entry-ext-extension-page.html"),
+			].includes(url)
+		)
+			return {
+				ok: false,
+				error: "Only extension UI can request an update check",
+			};
+		try {
+			return { ok: true, states: await updates.check() };
+		} catch (error) {
+			return { ok: false, error: String(error.message ?? error) };
+		}
+	}
+	if (message?.name === "UE_RESOURCE_BUNDLE") {
+		if (sender.id !== browser.runtime.id || !Number.isInteger(sender.tab?.id))
+			return { error: "Invalid script sender" };
+		return sendNativeMessage({
+			name: "UE_RESOURCE_BUNDLE",
+			identity: message.identity,
+		});
+	}
+	if (message?.name?.startsWith("UE_TAB_")) return tabRouter(message, sender);
+	if (message?.name === "UE_CLIPBOARD") {
+		try {
+			if (sender.id !== browser.runtime.id || !Number.isInteger(sender.tab?.id))
+				throw new Error("Invalid script sender");
+			await authorizeAPI(message.identity, "setClipboard");
+			if (
+				typeof message.data !== "string" ||
+				message.data.length > 5_000_000 ||
+				!["text/plain", "text/html"].includes(message.type)
+			)
+				throw new Error("Clipboard supports plain text and HTML up to 5 MB");
+			if (!setClipboard(message.data, message.type))
+				throw new Error(
+					"Safari denied clipboard access; a user gesture may be required",
+				);
+			return { ok: true };
+		} catch (error) {
+			return { ok: false, error: String(error.message ?? error) };
+		}
+	}
+	if (message?.name?.startsWith("UE_MENU_"))
+		return menuRouter.handle(message, sender);
 	switch (message.name) {
 		case "REQ_USERSCRIPTS": {
 			// get the page url from the content script that sent request
@@ -287,7 +417,7 @@ async function handleMessage(message, sender) {
 				if (response.error) return response;
 				// sort files
 				response.files.js.sort(userscriptSort);
-				response.files.css.sort((a, b) => Number(a.weight) < Number(b.weight));
+				response.files.css.sort((a, b) => Number(b.weight) - Number(a.weight));
 				// return sorted files for injection
 				return response;
 			} catch (error) {
@@ -296,260 +426,24 @@ async function handleMessage(message, sender) {
 				return { error: String(error) };
 			}
 		}
-		case "API_CLOSE_TAB": {
-			try {
-				await browser.tabs.remove(message.tabId || sender.tab.id);
-				return { status: "fulfilled" };
-			} catch (error) {
-				console.error(message, sender, error);
-				return { status: "rejected", result: String(error) };
-			}
-		}
-		case "API_OPEN_TAB": {
-			try {
-				const tab = await browser.tabs.create({
-					active: message.active,
-					index: sender.tab.index + 1,
-					url: message.url,
-				});
-				return { status: "fulfilled", result: tab };
-			} catch (error) {
-				console.error(message, sender, error);
-				return { status: "rejected", result: String(error) };
-			}
-		}
-		case "API_ADD_STYLE": {
-			try {
-				await browser.tabs.insertCSS(sender.tab.id, {
-					code: message.css,
-					cssOrigin: "user",
-				});
-				return { status: "fulfilled" };
-			} catch (error) {
-				console.error(message, sender, error);
-				return { status: "rejected", result: String(error) };
-			}
-		}
-		case "API_GET_TAB": {
-			if (typeof sender.tab === "undefined") {
-				const error = "unable to deliver tab due to empty tab id";
-				return { status: "rejected", result: error };
-			}
-			try {
-				const tabData = sessionStorage.getItem(`tab-${sender.tab.id}`);
-				// if tabData is null, can still parse it and return that
-				const tabObj = JSON.parse(tabData);
-				return { status: "fulfilled", result: tabObj };
-			} catch (error) {
-				console.error("failed to parse tab data for getTab", error);
-				return { status: "rejected", result: String(error) };
-			}
-		}
-		case "API_SAVE_TAB": {
-			if (sender.tab != null && sender.tab.id) {
-				const key = `tab-${sender.tab.id}`;
-				sessionStorage.setItem(key, JSON.stringify(message.tabObj));
-				return { status: "fulfilled" };
-			} else {
-				const error = "unable to save tab, empty tab id";
-				return { status: "rejected", result: String(error) };
-			}
-		}
-		case "API_SET_CLIPBOARD": {
-			const result = setClipboard(message.clipboardData, message.type);
-			return { status: "fulfilled", result };
-		}
-		case "API_XHR": {
-			try {
-				// initializing an xhr instance
-				const xhr = new XMLHttpRequest();
-				// establish a long-lived port connection to content script
-				/** @type {import("../global.d.ts").TypeBackground.XHRPort} */
-				const port = browser.tabs.connect(sender.tab.id, {
-					name: message.xhrPortName,
-				});
-				// receive messages from content script and process them
-				port.onMessage.addListener((msg) => {
-					if (msg.name === "ABORT") xhr.abort();
-					if (msg.name === "DISCONNECT") port.disconnect();
-				});
-				// handle port disconnect and clean tasks
-				port.onDisconnect.addListener((p) => {
-					if (p?.error) {
-						console.error(
-							`port disconnected due to an error: ${p.error.message}`,
-						);
-					}
-				});
-				// parse details and set up for xhr instance
-				/** @type {TypeExtMessages.XHRTransportableDetails} */
-				const details = message.details;
-				/** @type {Parameters<XMLHttpRequest["open"]>[0]} */
-				const method = details.method || "GET";
-				/** @type {Parameters<XMLHttpRequest["open"]>[1]} */
-				const url = details.url;
-				/** @type {Parameters<XMLHttpRequest["open"]>[3]} */
-				const user = details.user || null;
-				/** @type {Parameters<XMLHttpRequest["open"]>[4]} */
-				const password = details.password || null;
-				/** @type {Parameters<XMLHttpRequest["send"]>[0]} */
-				let body = null;
-				if (typeof details.data === "object") {
-					/** @type {TypeExtMessages.XHRProcessedData} */
-					const data = details.data;
-					if (typeof data.data === "string") {
-						if (data.type === "Text") {
-							// deprecate once body supports more data types
-							// the `binary` key will no longer needed
-							if (details.binary) {
-								const binaryString = data.data;
-								const view = new Uint8Array(binaryString.length);
-								for (let i = 0; i < binaryString.length; i++) {
-									view[i] = binaryString.charCodeAt(i);
-								}
-								body = view;
-							} else {
-								body = data.data;
-							}
-						}
-						if (data.type === "Document") {
-							body = data.data;
-							if (!("content-type" in details.headers)) {
-								details.headers["content-type"] = data.mime;
-							}
-						}
-						if (data.type === "URLSearchParams") {
-							body = new URLSearchParams(data.data);
-						}
-					}
-					if (Array.isArray(data.data)) {
-						if (
-							data.type === "ArrayBuffer" ||
-							data.type === "ArrayBufferView"
-						) {
-							body = new Uint8Array(data.data);
-						}
-						if (data.type === "Blob") {
-							body = new Uint8Array(data.data);
-							if (!("content-type" in details.headers)) {
-								details.headers["content-type"] = data.mime;
-							}
-						}
-						if (data.type === "FormData") {
-							body = new FormData();
-							for (const [k, v] of data.data) {
-								if (typeof v === "string") {
-									body.append(k, v);
-								} else {
-									const view = new Uint8Array(v.data);
-									body.append(
-										k,
-										new File([view], v.name, {
-											type: v.mime,
-											lastModified: v.lastModified,
-										}),
-									);
-								}
-							}
-						}
-					}
-				}
-				// xhr instances automatically filter out unexpected user values
-				xhr.timeout = details.timeout;
-				xhr.responseType = details.responseType;
-				// record parsed values for subsequent use
-				const responseType = xhr.responseType;
-				// avoid unexpected behavior of legacy defaults such as parsing XML
-				if (responseType === "") xhr.responseType = "text";
-				// transfer to content script via arraybuffer and then parse to blob
-				if (responseType === "blob") xhr.responseType = "arraybuffer";
-				// transfer to content script via text and then parse to document
-				if (responseType === "document") xhr.responseType = "text";
-				// add required listeners and send result back to the content script
-				if (details.hasUploadHandlers) {
-					for (const handler of Object.keys(details.hasUploadHandlers)) {
-						/** @param {ProgressEvent} event */
-						xhr.upload[handler] = async (event) => {
-							/** @type {TypeExtMessages.XHRProgress} */
-							const progress = {
-								lengthComputable: event.lengthComputable,
-								loaded: event.loaded,
-								total: event.total,
-							};
-							port.postMessage({ handler, progress });
-						};
-					}
-				}
-				const handlers = details.hasHandlers ?? {};
-				for (const handler of Object.keys(handlers)) {
-					xhr[handler] = async () => {
-						// can not send xhr through postMessage
-						// construct new object to be sent as "response"
-						/** @type {TypeExtMessages.XHRTransportableResponse} */
-						const response = {
-							contentType: undefined, // non-standard
-							readyState: xhr.readyState,
-							response: xhr.response,
-							responseHeaders: xhr.getAllResponseHeaders(),
-							responseType,
-							responseURL: xhr.responseURL,
-							status: xhr.status,
-							statusText: xhr.statusText,
-							timeout: xhr.timeout,
-						};
-						// https://developer.mozilla.org/en-US/docs/Web/API/XMLHttpRequest/response#value
-						if (xhr.readyState < xhr.DONE && xhr.responseType !== "text") {
-							response.response = null;
-						}
-						// get content-type when headers received
-						if (xhr.readyState >= xhr.HEADERS_RECEIVED) {
-							response.contentType = xhr.getResponseHeader("Content-Type");
-						}
-						// only process when xhr is complete and data exist
-						// note the status of the last `progress` event in Safari is DONE/4
-						// exclude this event to avoid unnecessary processing and transmission
-						if (
-							xhr.readyState === xhr.DONE &&
-							xhr.response !== null &&
-							handler !== "onprogress"
-						) {
-							// need to convert arraybuffer data to postMessage
-							if (
-								xhr.responseType === "arraybuffer" &&
-								xhr.response instanceof ArrayBuffer
-							) {
-								const buffer = xhr.response;
-								response.response = Array.from(new Uint8Array(buffer));
-							}
-						}
-						port.postMessage({ handler, response });
-					};
-				}
-				// if onloadend not set in xhr details
-				// onloadend event won't be passed to content script
-				// if that happens port DISCONNECT message won't be posted
-				// so if details lacks onloadend then attach the listener
-				if (!handlers.onloadend) {
-					xhr.onloadend = () => {
-						port.postMessage({ handler: "onloadend" });
-					};
-				}
-				if (details.overrideMimeType) {
-					xhr.overrideMimeType(details.overrideMimeType);
-				}
-				xhr.open(method, url, true, user, password);
-				// must set headers after `xhr.open()`, but before `xhr.send()`
-				if (typeof details.headers === "object") {
-					for (const [key, val] of Object.entries(details.headers)) {
-						xhr.setRequestHeader(key, val);
-					}
-				}
-				xhr.send(body);
-			} catch (error) {
-				console.error(error);
-			}
-			return { status: "fulfilled" };
-		}
+		case "API_CLOSE_TAB":
+		case "API_OPEN_TAB":
+		case "API_GET_TAB":
+		case "API_SAVE_TAB":
+		case "API_ADD_STYLE":
+		case "API_SET_CLIPBOARD":
+			return {
+				status: "rejected",
+				result: "Unscoped legacy transport disabled; reload this page",
+			};
+
+		case "API_XHR":
+			return {
+				status: "rejected",
+				result:
+					"Legacy unrestricted XHR transport is disabled; reload the page",
+			};
+
 		case "REFRESH_DNR_RULES": {
 			setDNRRulesets();
 			break;

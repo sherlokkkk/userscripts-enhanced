@@ -1,4 +1,6 @@
 <script>
+	import { metadataWarnings } from "../../../shared/metadata.js";
+	import { validGrants } from "@ext/utils.js";
 	import iconWarn from "@shared/img/icon-warn.svg?raw";
 	import iconError from "@shared/img/icon-error.svg?raw";
 
@@ -6,6 +8,7 @@
 	export let installError;
 	export let installCancelClick;
 	export let installConfirmClick;
+	export let sourceURL = "";
 </script>
 
 <div class="view--install">
@@ -22,38 +25,23 @@
 			{#if userscript.description}
 				<li class="userscript--description">{userscript.description}</li>
 			{/if}
-			{#if userscript.match}
+			{#if sourceURL}<li class="userscript--field">
+					<div>Source</div>
+					<div>{sourceURL}</div>
+				</li>{/if}
+			{#each Object.entries(userscript).filter(([key]) => !["name", "description"].includes(key)) as [key, values] (key)}
 				<li class="userscript--field">
-					<div>@match</div>
-					{#each userscript.match as match (match)}
-						<div class="truncate">{match}</div>
-					{/each}
+					<div>@{key}</div>
+					{#each values as value, index (index)}<div>
+							{value || "(present)"}
+						</div>{/each}
 				</li>
-			{/if}
-			{#if userscript.include}
-				<li class="userscript--field">
-					<div>@include</div>
-					{#each userscript.include as include (include)}
-						<div class="truncate">{include}</div>
-					{/each}
-				</li>
-			{/if}
-			{#if userscript.require}
-				<li class="userscript--field">
-					<div>@require</div>
-					{#each userscript.require as require (require)}
-						<div class="truncate">{require}</div>
-					{/each}
-				</li>
-			{/if}
-			{#if userscript.grant}
-				<li class="userscript--field">
-					<div>@grant</div>
-					{#each userscript.grant as grant (grant)}
-						<div>{grant}</div>
-					{/each}
-				</li>
-			{/if}
+			{/each}
+			{#each metadataWarnings(userscript, validGrants) as warning, index (index)}<li
+					class="userscript--field"
+				>
+					{warning}
+				</li>{/each}
 		</ul>
 		<div class="badge">
 			<!-- eslint-disable-next-line svelte/no-at-html-tags -->

@@ -1,14 +1,21 @@
 import SafariServices
 
+private func enhancedErrorForMessage() -> NSError {
+    NSError(domain: "UserscriptsEnhanced", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid management request"])
+}
+
 class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 	func beginRequest(with context: NSExtensionContext) {
 		defer { USLogStoreToFile() }
 		let logger = USLogger(#fileID)
-		let item = context.inputItems[0] as? NSExtensionItem
+		let item = context.inputItems.first as? NSExtensionItem
 		let message = item?.userInfo?[SFExtensionMessageKey] as? [String: Any]
 		// if message received without name, ignore
 		guard let name = message?["name"] as? String else {
 			logger?.error("\(#function, privacy: .public) - could not get message name from web extension")
+            let response = NSExtensionItem()
+            response.userInfo = [SFExtensionMessageKey: ["error": "Missing native message name"]]
+            context.completeRequest(returningItems: [response], completionHandler: nil)
 			return
 		}
 		logger?.info("\(#function, privacy: .public) - Got message with name: \(name, privacy: .public)")
@@ -35,7 +42,58 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 			let platform = getPlatform()
 			response.userInfo = [SFExtensionMessageKey: ["platform": platform]]
 		}
-		else if name == "REQ_USERSCRIPTS" {
+		else if name == "UE_RESOURCE_BUNDLE" {
+            do {
+                guard let identity = message?["identity"] as? [String: Any] else { throw enhancedErrorForMessage() }
+                response.userInfo = [SFExtensionMessageKey: ["resources": try enhancedResourceBundle(identity)]]
+            } catch { response.userInfo = [SFExtensionMessageKey: ["error": error.localizedDescription]] }
+        }
+        else if name == "UE_AUTHORIZE_API" {
+            if let identity = message?["identity"] as? [String: Any], let method = message?["method"] as? String {
+                response.userInfo = [SFExtensionMessageKey: ["allowed": authorizeGrantedAPI(identity, method)]]
+            } else { inBoundError = true }
+        }
+        else if name == "UE_AUTHORIZE_XHR" {
+            if let identity = message?["identity"] as? [String: Any] {
+                response.userInfo = [SFExtensionMessageKey: authorizeXHR(identity)]
+            } else { inBoundError = true }
+        }
+        else if name == "UE_VALIDATE_MENU_SCRIPTS" {
+            if let scripts = message?["scripts"] as? [[String: Any]] {
+                response.userInfo = [SFExtensionMessageKey: ["allowed": validateMenuScripts(scripts)]]
+            } else { inBoundError = true }
+        }
+        else if name.hasPrefix("UE_DATA_") {
+            do {
+                var result: [String: Any] = [:]
+                switch name {
+                case "UE_DATA_EXPORT": result = try enhancedExport()
+                case "UE_DATA_PREVIEW":
+                    guard let backup = message?["backup"] as? [String: Any] else { throw enhancedErrorForMessage() }
+                    result = try enhancedPreviewImport(backup)
+                case "UE_DATA_RESTORE":
+                    guard let backup = message?["backup"] as? [String: Any], let revision = message?["revision"] as? String else { throw enhancedErrorForMessage() }
+                    result = ["transactionId": try enhancedImport(backup, expectedRevision: revision)]
+                case "UE_DATA_ROLLBACK":
+                    guard let id = message?["id"] as? String else { throw enhancedErrorForMessage() }
+                    try enhancedRollbackImport(id)
+                    result = ["success": true]
+                case "UE_DATA_CHECK_UPDATE":
+                    guard let filename = message?["filename"] as? String else { throw enhancedErrorForMessage() }
+                    result = try enhancedCheckUpdate(filename)
+                case "UE_DATA_PREPARE_UPDATE":
+                    guard let filename = message?["filename"] as? String else { throw enhancedErrorForMessage() }
+                    result = try enhancedPrepareUpdate(filename)
+                case "UE_DATA_APPLY_UPDATE":
+                    guard let id = message?["id"] as? String, let revision = message?["revision"] as? String else { throw enhancedErrorForMessage() }
+                    result = ["transactionId": try enhancedApplyUpdate(id, revision: revision)]
+                default: throw enhancedErrorForMessage()
+                }
+                response.userInfo = [SFExtensionMessageKey: result]
+            } catch { response.userInfo = [SFExtensionMessageKey: ["error": error.localizedDescription]] }
+        }
+
+        else if name == "REQ_USERSCRIPTS" {
 			if let url = message?["url"] as? String, let isTop = message?["isTop"] as? Bool {
 				if
 					let matches = getInjectionFilenames(url),
@@ -92,28 +150,10 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 				response.userInfo = [SFExtensionMessageKey: ["error": "failed to get updates"]]
 			}
 		}
-		else if name == "POPUP_UPDATE_ALL" {
-			if popupUpdateAll(), let updates = checkForRemoteUpdates() {
-				response.userInfo = [SFExtensionMessageKey: ["updates": updates]]
-			} else {
-			   response.userInfo = [SFExtensionMessageKey: ["error": "failed to run update sequence"]]
-			}
-		}
-		else if name == "POPUP_UPDATE_SINGLE" {
-			if
-				let filename = message?["filename"] as? String,
-				let url = message?["url"] as? String,
-				let frameUrls = message?["frameUrls"] as? [String]
-			{
-				if let matches = popupUpdateSingle(filename, url, frameUrls) {
-					response.userInfo = [SFExtensionMessageKey: ["items": matches]]
-				} else {
-					response.userInfo = [SFExtensionMessageKey: ["error": "failed to update file"]]
-				}
-			} else {
-				inBoundError = true
-			}
-		}
+        else if name == "POPUP_UPDATE_ALL" || name == "POPUP_UPDATE_SINGLE" {
+            response.userInfo = [SFExtensionMessageKey: ["error": "Open Data & Updates in the management page to review each update before applying it"]]
+        }
+
 		else if name == "POPUP_CHECK_UPDATES" {
 			if let updates = checkForRemoteUpdates() {
 				response.userInfo = [SFExtensionMessageKey: ["updates": updates]]

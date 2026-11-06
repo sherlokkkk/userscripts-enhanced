@@ -133,6 +133,13 @@ func getCurrentScriptsDirectoryString() -> String {
 	}
 }
 
+func isUpstreamUserscriptsContainer(_ url: URL) -> Bool {
+    let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+    return path.contains("/Library/Containers/com.userscripts.") ||
+        path.contains("/Library/Group Containers/J74Q8V8V8N.com.userscripts.") ||
+        path.contains("/Library/Group Containers/group.com.userscripts.")
+}
+
 func getSaveLocation() -> URL? {
 #if os(iOS)
 	if isCurrentDefaultScriptsDirectory() {
@@ -141,6 +148,7 @@ func getSaveLocation() -> URL? {
 	}
 #endif
 	let url = Preferences.scriptsDirectoryUrl
+    if isUpstreamUserscriptsContainer(url) { return nil }
 	logger?.debug("\(#function, privacy: .public) - \(url, privacy: .public)")
 	return url
 }

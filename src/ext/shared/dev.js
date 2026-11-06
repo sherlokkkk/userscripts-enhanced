@@ -90,6 +90,8 @@ const _browser = {
 	delay: 200,
 	platform,
 	runtime: {
+		id: "dev",
+		onMessage: { addListener() {}, removeListener() {} },
 		getURL() {
 			return "https://www.example.com/";
 		},
@@ -102,6 +104,9 @@ const _browser = {
 			let response = {};
 			if (name === "REFRESH_DNR_RULES") {
 				response = { success: true };
+			}
+			if (name === "UE_MENU_LIST") {
+				response = { ok: true, scripts: [] };
 			}
 			if (!responseCallback) {
 				return new Promise((resolve) => {

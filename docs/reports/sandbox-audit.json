@@ -1,0 +1,35 @@
+{
+	"checkedAt": "2026-11-06T08:18:28.190Z",
+	"gate": "hostile-userscript-isolation",
+	"passed": true,
+	"finding": "All explicit escape attempts blocked; granted storage, real DOM, menu and panel callbacks work.",
+	"method": "Compile the actual entry and real DOM membrane, execute in JSDOM realms with synthetic extension APIs. Test-only observer does not replace the boundary.",
+	"safariVerified": false,
+	"evidence": {
+		"completed": true,
+		"results": [
+			{ "name": "ambient browser.storage", "blocked": true },
+			{ "name": "globalThis", "blocked": true },
+			{ "name": "window", "blocked": true },
+			{ "name": "Function constructor", "blocked": true },
+			{ "name": "GM function constructor", "blocked": true },
+			{ "name": "async constructor", "blocked": true },
+			{ "name": "DOM constructor", "blocked": true },
+			{ "name": "DOM defaultView", "blocked": true },
+			{ "name": "descriptor", "blocked": true },
+			{ "name": "foreign frame", "blocked": true },
+			{ "name": "event view", "blocked": true },
+			{ "name": "window.top", "blocked": true },
+			{ "name": "bare top", "blocked": true },
+			{ "name": "realm top", "blocked": true },
+			{ "name": "top descriptor", "blocked": true },
+			{ "name": "parent", "blocked": true }
+		],
+		"own": { "allowed": [1, true] },
+		"stored": { "array": [1, { "ok": true }] },
+		"dom": "DOM works"
+	},
+	"callbacks": true,
+	"negativeControl": true,
+	"errors": []
+}

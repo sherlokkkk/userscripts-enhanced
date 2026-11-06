@@ -1,0 +1,17 @@
+// Enhanced never uses the upstream App Store identifiers, even in Release.
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development
+DEVELOPMENT_TEAM =
+ORG_IDENTIFIER = local.userscripts-enhanced
+APP_IDENTIFIER = $(ORG_IDENTIFIER).mac
+APP_IDENTIFIER[config=Release] = $(ORG_IDENTIFIER).mac.release
+EXT_IDENTIFIER = $(APP_IDENTIFIER).extension
+IOS_SHARED_GID = group.$(ORG_IDENTIFIER)
+MAC_SHARED_GID = $(DEVELOPMENT_TEAM).$(ORG_IDENTIFIER)
+MAC_SHARED_GID[config=Release] = $(DEVELOPMENT_TEAM).$(ORG_IDENTIFIER).release
+APP_URL_SCHEME = userscripts-enhanced
+APP_URL_SCHEME[config=Release] = userscripts-enhanced-release
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 5
+INFOPLIST_KEY_NSHumanReadableCopyright = Userscripts Enhanced contributors; based on Userscripts (GPL-3.0)
+#include? "Userscripts-Enhanced.dev.xcconfig"

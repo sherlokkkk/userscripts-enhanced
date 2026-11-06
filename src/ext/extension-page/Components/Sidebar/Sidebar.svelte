@@ -28,9 +28,28 @@
 		(a) => a.visible !== false,
 	);
 
+	// The toolbar popup deep-links a script with #script=<filename>.
+	const requestedScript = () =>
+		new URLSearchParams(location.hash.slice(1)).get("script");
+	function activateRequested() {
+		const filename = requestedScript();
+		if (!filename) return false;
+		const params = new URLSearchParams(location.hash.slice(1));
+		params.delete("script");
+		history.replaceState(null, "", `#${params.toString()}`);
+		const target = list.find((a) => a.filename === filename);
+		if (target) activate(target);
+		return !!target;
+	}
+	function onHashChange() {
+		if (list.length) activateRequested();
+	}
+
 	// always scroll to an active item
 	// when sorting is changed, a save occurs, etc... will scroll to active item
-	$: if (list.find((a) => a.active)) {
+	$: if (list.length && requestedScript()) {
+		activateRequested();
+	} else if (list.find((a) => a.active)) {
 		const active = list.find((a) => a.active);
 		scrollToEl(active.filename);
 	} else {
@@ -175,6 +194,11 @@
 		input.disabled = true;
 		sendNativeMessage({ name: "TOGGLE_ITEM", item }).then((response) => {
 			if (!response.error) {
+				if (!item.disabled)
+					browser.runtime.sendMessage({
+						name: "UE_MENU_INVALIDATE",
+						filename: item.filename,
+					});
 				items.update((allItems) => {
 					const ind = allItems.find((i) => i.filename === item.filename);
 					ind.disabled = !ind.disabled;
@@ -207,6 +231,8 @@
 		sidebarTimeout = setTimeout(() => (showCount = true), 750);
 	}
 </script>
+
+<svelte:window on:hashchange={onHashChange} />
 
 <div
 	class="sidebar"

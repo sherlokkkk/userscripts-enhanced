@@ -24,3 +24,6 @@ temp
 package-lock.json
 pnpm-lock.yaml
 yarn.lock
+
+# Preserve hash-locked user-provided upstream test sources byte-for-byte
+/tests/reference/

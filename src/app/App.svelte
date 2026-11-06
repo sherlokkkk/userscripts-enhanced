@@ -2,7 +2,6 @@
 
 <script>
 	import LogoIcon from "@shared/Components/LogoIcon.svelte";
-	import LogoText from "@shared/Components/LogoText.svelte";
 	import IconDebug from "@shared/img/icon-bug.svg?raw";
 	import Dropdown from "@shared/Components/Dropdown.svelte";
 	import { i18nInit } from "./i18n.js";
@@ -108,7 +107,9 @@
 </script>
 
 <main>
-	{#await initialize() then app}
+	{#await initialize()}
+		<p role="status">Loading Userscripts Enhanced…</p>
+	{:then app}
 		{#if OOBE}
 			<div class="guide-overlay">
 				<header>{gl("quick_start_guide_title")}</header>
@@ -148,20 +149,13 @@
 		{/if}
 		<div class="section app">
 			<div class="logo-icon"><LogoIcon /></div>
-			<div class="logo-text"><LogoText /></div>
+			<h1>Userscripts Enhanced</h1>
 			<div class="version">
-				{#if import.meta.env.GIT_TAG && import.meta.env.GIT_COMMIT}
-					<a href="{baseUrl}/releases/tag/{import.meta.env.GIT_TAG}">
-						{import.meta.env.GIT_TAG}
-					</a>
-					<span
-						>(<a href="{baseUrl}/commit/{import.meta.env.GIT_COMMIT}">
-							{import.meta.env.GIT_COMMIT.slice(0, 7)}
-						</a>)</span
+				<span>v{app.version} · Development preview</span>
+				{#if import.meta.env.GIT_COMMIT}
+					<a href="{baseUrl}/commit/{import.meta.env.GIT_COMMIT}"
+						>base {import.meta.env.GIT_COMMIT.slice(0, 7)}</a
 					>
-				{:else}
-					<span>v{app.version}</span>
-					<span>({app.build})</span>
 				{/if}
 			</div>
 			{#if platform === "mac"}
@@ -205,6 +199,12 @@
 </main>
 
 <style>
+	h1 {
+		font-size: 1.75rem;
+		font-weight: 600;
+		letter-spacing: -0.04em;
+	}
+
 	main {
 		flex-direction: column;
 		place-items: center;
@@ -303,11 +303,6 @@
 	.section.app .logo-icon :global(svg) {
 		height: min(7rem, 150px);
 		padding: 0.7rem;
-	}
-
-	.section.app .logo-text :global(svg) {
-		display: flex;
-		height: min(1.5rem, 32px);
 	}
 
 	.section.app .status {

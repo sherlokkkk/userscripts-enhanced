@@ -25,14 +25,19 @@ func encodeURI(_ uri: String) -> String {
 }
 
 func fixedURL(string urlString: String) -> URL? {
-	let rawUrlString = urlString.removingPercentEncoding ?? urlString
-	var url: URL?
-	if #available(macOS 14.0, iOS 17.0, *) {
-		url = URL(string: rawUrlString, encodingInvalidCharacters: true)
-	} else {
-		url = URL(string: encodeURI(rawUrlString))
-	}
-	return url
+    // Preserve reserved escapes, and normalize IDN separately from path/query.
+    let allowed = CharacterSet.urlAllowed_.union(CharacterSet(charactersIn: "%"))
+    let encoded = urlString.addingPercentEncoding(withAllowedCharacters: allowed) ?? urlString
+    guard var components = URLComponents(string: encoded) else { return nil }
+    if let hostname = components.host, !hostname.isEmpty {
+        let hostURL: URL?
+        if #available(macOS 14.0, iOS 17.0, *) {
+            hostURL = URL(string: "https://" + hostname, encodingInvalidCharacters: true)
+        } else { hostURL = URL(string: "https://" + hostname) }
+        guard let asciiHost = hostURL?.host else { return nil }
+        components.host = asciiHost.lowercased()
+    }
+    return components.url
 }
 
 // https://developer.mozilla.org/en-US/docs/Web/API/URL
@@ -63,7 +68,7 @@ func jsLikeURL(_ urlString: String, baseString: String? = nil) -> [String: Strin
 	 https://forums.developer.apple.com/forums/thread/722451
 	 */
 	if #available(macOS 15.0, iOS 18.0, *) {
-		guard let hostname = url.host(percentEncoded: true) else { return nil }
+		guard let hostname = url.host(percentEncoded: false) else { return nil }
 		let host = (port == "") ? hostname : "\(hostname):\(port)"
 		let query = url.query(percentEncoded: true) ?? ""
 		let fragment = url.fragment(percentEncoded: true) ?? ""

@@ -8,6 +8,21 @@ func getSaveLocationURL() -> URL {
 }
 
 func setSaveLocationURL(url: URL) -> Bool {
+    guard !isUpstreamUserscriptsContainer(url) else {
+        let alert = NSAlert()
+        alert.messageText = "Choose an independent Enhanced folder"
+        alert.informativeText = "The App Store Userscripts container must remain separate. Copy scripts into an import folder and use Data & Updates to preview the import."
+        alert.runModal()
+        return false
+    }
+    if url.standardizedFileURL != Preferences.scriptsDirectoryUrl.standardizedFileURL,
+       directoryEmpty(at: url) != true {
+        let alert = NSAlert()
+        alert.messageText = "Choose an empty destination folder"
+        alert.informativeText = "Enhanced does not adopt an existing script directory directly. Import copies through Data & Updates so conflicts can be reviewed."
+        alert.runModal()
+        return false
+    }
 	guard FileManager.default.isReadableFile(atPath: url.path) else {
 		let alert = NSAlert()
 		alert.messageText = "Cannot read the specified path; please choose a different one."
@@ -46,7 +61,7 @@ func changeSaveLocationPanel(directoryURL: URL? = nil) -> NSOpenPanel {
 	if directoryURL != nil {
 		panel.directoryURL = directoryURL
 	}
-	panel.title = "Change Save Location - Userscripts"
+	panel.title = "Choose an independent folder — Userscripts Enhanced"
 	panel.identifier = NSUserInterfaceItemIdentifier("changeSaveLocation")
 	return panel
 }

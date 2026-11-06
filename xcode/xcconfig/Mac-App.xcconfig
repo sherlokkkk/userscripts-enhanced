@@ -19,5 +19,13 @@ SWIFT_ACTIVE_COMPILATION_CONDITIONS = APP $(inherited)
 // Provisioning Profile
 PROVISIONING_PROFILE_SPECIFIER[config=Release] = match AppStore $(APP_IDENTIFIER) macos
 
+PRODUCT_NAME = Userscripts Enhanced
+PRODUCT_NAME[config=Debug] = Userscripts Enhanced Debug
+PRODUCT_NAME[config=Vite] = Userscripts Enhanced Vite
+INFOPLIST_KEY_CFBundleDisplayName = $(PRODUCT_NAME)
+INFOPLIST_KEY_CFBundleDisplayName[config=Debug] = $(PRODUCT_NAME)
+INFOPLIST_KEY_CFBundleDisplayName[config=Vite] = $(PRODUCT_NAME)
+PROVISIONING_PROFILE_SPECIFIER[config=Release] =
+
 // Override this file
 #include? "Mac-App.dev.xcconfig"

@@ -1,0 +1,33 @@
+{
+	"callbacks": true,
+	"engine": "WKWebView isolated WKContentWorld",
+	"errors": [],
+	"evidence": {
+		"completed": true,
+		"dom": "DOM works",
+		"own": { "allowed": [1, true] },
+		"results": [
+			{ "blocked": true, "name": "ambient browser.storage" },
+			{ "blocked": true, "name": "globalThis" },
+			{ "blocked": true, "name": "window" },
+			{ "blocked": true, "name": "Function constructor" },
+			{ "blocked": true, "name": "GM function constructor" },
+			{ "blocked": true, "name": "async constructor" },
+			{ "blocked": true, "name": "DOM constructor" },
+			{ "blocked": true, "name": "DOM defaultView" },
+			{ "blocked": true, "name": "descriptor" },
+			{ "blocked": true, "name": "foreign frame" },
+			{ "blocked": true, "name": "event view" },
+			{ "blocked": true, "name": "window.top" },
+			{ "blocked": true, "name": "bare top" },
+			{ "blocked": false, "name": "realm top" },
+			{ "blocked": false, "name": "top descriptor" },
+			{ "blocked": true, "name": "parent" }
+		],
+		"stored": { "array": [1, { "ok": true }] }
+	},
+	"method": "Unmodified compiled production entry and DOM membrane. Synthetic WebExtension APIs; real WebKit realms, DOM, menu and panel callbacks.",
+	"passed": false,
+	"safariVerified": false,
+	"checkedAt": "2026-11-06T08:18:29.462Z"
+}

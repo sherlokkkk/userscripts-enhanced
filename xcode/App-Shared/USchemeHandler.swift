@@ -36,7 +36,12 @@ class USchemeHandler: NSObject, WKURLSchemeHandler {
 			} else {
 				name = url.path
 			}
-			if ["", "/"].contains(name) {
+			name = name.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard !name.split(separator: "/").contains("..") else {
+                failHandler("Invalid resource path")
+                return
+            }
+            if name.isEmpty {
 				name = AppWebViewEntryPage
 			}
 			guard let file = Bundle.main.url(forResource: name, withExtension: nil, subdirectory: "dist") else {
@@ -52,7 +57,7 @@ class USchemeHandler: NSObject, WKURLSchemeHandler {
 			// let mime = UTType.init(filenameExtension: file.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
 			let mime = UTTypeReference.init(filenameExtension: file.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
 
-			let response = URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: nil)
+			let response = URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: "utf-8")
 			urlSchemeTask.didReceive(response)
 			urlSchemeTask.didReceive(data)
 			urlSchemeTask.didFinish()

@@ -41,7 +41,8 @@
 		"storage",
 		"tabs",
 		"unlimitedStorage",
-		"webNavigation"
+		"webNavigation",
+		"alarms"
 	],
 	"browser_specific_settings": {
 		"safari": {

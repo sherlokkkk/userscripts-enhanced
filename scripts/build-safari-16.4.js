@@ -9,7 +9,7 @@
  * Content scripts not support import modules, and due to their privileges and the
  * speed of injecting user scripts, use a independent build currently
  *
- * All build processes start at the same time due to asynchronous calls
+ * Build steps are awaited so Xcode never consumes partially written resources
  * The assets name is irrelevant, just need to determine the entry path
  */
 
@@ -34,7 +34,7 @@ const sharedConfig = {
 /**
  * Build App-Shared WebView resources to xcode dist
  */
-build({
+await build({
 	...Utils.baseConfig,
 	plugins: [svelte(), pluginMarkedDivest()],
 	build: {
@@ -52,16 +52,17 @@ build({
  * Copy public static assets
  */
 await Utils.emptyBuildDir(Utils.EXT_SAFARI_RESOURCES);
-Utils.cp("public/ext/shared", Utils.EXT_SAFARI_RESOURCES);
-Utils.cp("public/ext/safari-16.4", Utils.EXT_SAFARI_RESOURCES);
+await Utils.cp("public/ext/shared", Utils.EXT_SAFARI_RESOURCES);
+await Utils.cp("public/ext/safari-16.4", Utils.EXT_SAFARI_RESOURCES);
 
 /** Build content scripts */
-[
+const contentInputs = [
 	{ userscripts: "src/ext/content-scripts/entry-userscripts.js" },
 	{ "dot-user-js": "src/ext/content-scripts/entry-dot-user-js.js" },
 	{ "script-market": "src/ext/content-scripts/entry-script-market.js" },
-].forEach((input) => {
-	build({
+];
+for (const input of contentInputs) {
+	await build({
 		...sharedConfig,
 		build: {
 			...sharedConfig.build,
@@ -70,18 +71,18 @@ Utils.cp("public/ext/safari-16.4", Utils.EXT_SAFARI_RESOURCES);
 			copyPublicDir: false,
 			rollupOptions: {
 				input,
-				output: { entryFileNames: "[name].js" },
+				output: { entryFileNames: "[name].js", format: "iife" },
 			},
 		},
 	});
-});
+}
 
 /**
  * Build background scripts
  * Modular background may not load correctly on Safari startup
  * Currently build classic script separately to avoid this error
  */
-build({
+await build({
 	...sharedConfig,
 	build: {
 		...sharedConfig.build,
@@ -96,7 +97,7 @@ build({
 });
 
 /** Build shared modules */
-build({
+await build({
 	...sharedConfig,
 	plugins: [svelte()],
 	publicDir: "public/ext/vendor/",
