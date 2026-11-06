@@ -2,6 +2,8 @@
 
 ## 0.1.0 开发预览 — 2026-11-06
 
+Build 7 新增脚本快捷键管理：源码静态检测加运行时观察，在弹窗中显示，并可逐个停用、改键或还原（隔离脚本，即时生效）。新增 tests/shortcuts.test.js 与 tests/keyboard-webkit.js（真实 WebKit，纳入 verify）。
+
 Build 6 自建 realm 链接：宿主 window 进入脚本时对应脚本自己的 scope，不再暴露 realm 原始全局对象；拒绝宿主端代码编译入口与字符串定时器；realm 内 Function/eval/构造器改为在 scope 内编译；默认严格模式；改写动态 import()。新增每脚本“兼容模式（不安全）”。审计扩充到 30 条路径，JSDOM 与 WebKit 均全部阻断。
 
 Build 5 修复沙箱窗口身份（`top`/`self`/`parent`/`frames`/`globalThis`）与实时 `location`，使带顶层判断的脚本重新运行；修复结构化克隆类 API 的 DataCloneError；新增弹窗脚本设置（自动弹出偏好、管理页直达、刷新）与 page 世界菜单桥；SpeedMaster 适配版 4.2.2 恢复播放时自动显示面板并遵守偏好。新增审计路径发现 realm iframe 的 `top` 可直达扩展 API，隔离门禁失败，记录于安全模型。

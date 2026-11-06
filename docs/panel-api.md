@@ -39,3 +39,20 @@ const autoPopup = !(
 ```
 
 `@inject-into page` 的脚本现在也可以声明 `@grant GM_registerMenuCommand` 并注册工具栏命令（见 security-model.md 的 Build 5 说明），从而在弹窗中提供“打开设置”之类的入口。
+
+## 快捷键：自动检测、改键与停用（Build 7）
+
+弹窗脚本详情的“快捷键”区列出脚本使用的键盘快捷键，来源有两种：
+
+- **代码中检测**：注入时扫描脚本源码，识别 `e.key/e.code === …`（同一行上要求的修饰键一并计入）、`e.keyCode === N`、`switch (e.key) { case … }`，以及 `'Ctrl+Shift+KeyH'` 这类组合字符串。注释中的示例会被忽略。这是启发式推测。
+- **使用中发现**：隔离环境（content）脚本的键盘监听器（任意目标上 `addEventListener` 注册的 keydown/keyup/keypress，含 `handleEvent` 对象）被包装；监听器调用 `preventDefault` 或 `stopPropagation` 时，记为该脚本处理了这个快捷键，保存在 `UE_SHORTCUTS_SEEN`，之后访问也会列出。
+
+每个快捷键可以：
+
+- **停用**：该按键事件不再交给此脚本（不影响网页和其他脚本）。
+- **改键**：录制新组合后，按新组合时脚本收到一个看起来是原组合的事件（`key/code/keyCode/修饰键` 被替换，`preventDefault` 等仍作用于真实事件）；原组合不再触发此脚本。与此脚本其他快捷键冲突时拒绝修改。
+- **还原**。
+
+设置保存在 `UE_SCRIPT_PREFS[scriptId].shortcuts`，对已打开的网页即时生效，无需刷新。
+
+限制：页面环境（`@inject-into page` 或无 grant 的 auto）脚本只显示检测结果，无法改键或停用；`element.onkeydown = …` 形式注册的处理器不经过包装；被替换的事件对象不能再传给 `dispatchEvent`。

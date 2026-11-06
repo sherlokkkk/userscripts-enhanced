@@ -6,12 +6,14 @@ import { metadataWarnings } from "../shared/metadata.js";
 import { validGrants } from "../shared/utils.js";
 import { createValueStore } from "./value-store.js";
 import { MenuRuntime } from "./menu-runtime.js";
+import { createKeyboardRuntime } from "./keyboard-runtime.js";
 import { colors } from "@shared/colors.js";
 
 // code received from background page will be stored in this variable
 // code referenced again when strict CSPs block initial injection attempt
 let data;
 let menuRuntime;
+let keyboard;
 const valueStores = [];
 const tabContexts = [];
 const sandboxContexts = [];
@@ -233,7 +235,13 @@ ${userscript.code}
 			);
 			const sandbox =
 				existing?.sandbox ??
-				createScriptSandbox(userscript.apis, { legacy: legacyMode(scriptId) });
+				createScriptSandbox(userscript.apis, {
+					legacy: legacyMode(scriptId),
+					keyboard: {
+						rules: keyboard.rules(scriptId),
+						report: keyboard.reporter(scriptId),
+					},
+				});
 			if (!existing) sandboxContexts.push({ filename, sandbox });
 			sandbox.evaluate(code);
 		} catch (error) {
@@ -314,6 +322,12 @@ async function injection() {
 	} catch (error) {
 		console.warn("Userscripts Enhanced: script preferences unavailable", error);
 	}
+	keyboard = createKeyboardRuntime({
+		storage: browser.storage.local,
+		getSettings: (scriptId) => ownPreferences(scriptId).shortcuts,
+		onChange: () => menuRuntime.changed(),
+	});
+	await keyboard.load();
 	// combine regular and context-menu scripts
 	const scripts = [...data.files.js, ...data.files.menu];
 	// loop through each userscript and prepare for processing
@@ -585,6 +599,15 @@ async function injection() {
 				return value(...args);
 			};
 		}
+		// Shortcut detection; only isolated (content) scripts can be remapped.
+		const shortcutScriptId = userscript.scriptObject.scriptId;
+		keyboard.register(shortcutScriptId, {
+			source: userscript.code,
+			editable: userscript.scriptObject["inject-into"] === "content",
+		});
+		menuRuntime.setShortcuts(shortcutScriptId, () =>
+			keyboard.snapshot(shortcutScriptId),
+		);
 		// triage userjs item for injection
 		triageJS(userscript);
 	}
@@ -694,6 +717,12 @@ async function initialize() {
 	};
 	browser.runtime.onMessage.addListener(menuListener);
 	browser.storage.onChanged.addListener((changes, area) => {
+		// Popup settings (shortcut rules) apply live to running scripts.
+		if (area === "local" && changes[SCRIPT_PREFS_KEY]) {
+			const value = changes[SCRIPT_PREFS_KEY].newValue;
+			preferences = value && typeof value === "object" ? value : {};
+			menuRuntime.changed();
+		}
 		if (area === "local" && changes.US_GLOBAL_ACTIVE?.newValue === false) {
 			menuRuntime.revoke();
 			for (const context of sandboxContexts) context.sandbox.dispose();

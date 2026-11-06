@@ -104,6 +104,12 @@ export class MenuRuntime {
 		return script.api;
 	}
 
+	// `provider` returns plain shortcut data for the popup (keyboard-runtime).
+	setShortcuts(scriptId, provider) {
+		const script = this.scripts.get(scriptId);
+		if (script) script.shortcuts = provider;
+	}
+
 	isRevoked(scriptId) {
 		return this.closed || this.scripts.get(scriptId)?.revoked !== false;
 	}
@@ -119,9 +125,18 @@ export class MenuRuntime {
 				commands,
 				revoked,
 			} of this.scripts.values()) {
-				if (revoked || (!commands.size && !this.scripts.get(scriptId).panel))
+				const shortcuts = this.scripts.get(scriptId).shortcuts?.();
+				if (
+					revoked ||
+					(!commands.size &&
+						!this.scripts.get(scriptId).panel &&
+						!shortcuts?.list?.length)
+				)
 					continue;
 				scripts.push({
+					shortcuts: shortcuts?.list?.length
+						? structuredClone(shortcuts)
+						: undefined,
 					scriptId,
 					filename,
 					name,

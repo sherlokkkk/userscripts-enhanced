@@ -214,8 +214,132 @@ const SCOPE_BOOTSTRAP = `(function (hostLocation, isTop, legacy, scopeKey, impor
 	return (compiled) => apply(compiled, scope, values());
 })`;
 
+// Evaluated inside the sandbox realm after SCOPE_BOOTSTRAP. Wraps the script's
+// keyboard listeners (addEventListener on any target) so the manager can
+// disable or remap its shortcuts, and learns which shortcuts it handles.
+// `rulesJSON()` returns the current rules as JSON text (re-read on change):
+// [{ when: shortcut, deliver: null | { shortcut, fields } }]. `deliver: null`
+// suppresses the event for this script; `fields` make the event look like the
+// original shortcut the script expects. A listener that calls preventDefault
+// or stopPropagation "handled" the shortcut, which is reported back.
+const KEYBOARD_BOOTSTRAP = `(function (rulesJSON, report) {
+	"use strict";
+	const { apply, defineProperty, get } = Reflect;
+	const proto = EventTarget.prototype;
+	const add = proto.addEventListener;
+	const remove = proto.removeEventListener;
+	const types = new Set(["keydown", "keyup", "keypress"]);
+	const wrappers = new WeakMap();
+	let text;
+	let rules = [];
+	const currentRules = () => {
+		let next;
+		try {
+			next = String(rulesJSON());
+		} catch {
+			return rules;
+		}
+		if (next !== text) {
+			text = next;
+			try {
+				rules = JSON.parse(next);
+			} catch {
+				rules = [];
+			}
+		}
+		return rules;
+	};
+	const keyOf = (key) => (typeof key === "string" && key.length === 1 ? key.toLowerCase() : key);
+	const matches = (shortcut, event) =>
+		!!event.ctrlKey === shortcut.mods.ctrl &&
+		!!event.altKey === shortcut.mods.alt &&
+		!!event.shiftKey === shortcut.mods.shift &&
+		!!event.metaKey === shortcut.mods.meta &&
+		(shortcut.code ? event.code === shortcut.code : keyOf(event.key) === shortcut.key);
+	const disguise = (event, fields) => {
+		const modifier = { Control: fields.ctrlKey, Alt: fields.altKey, Shift: fields.shiftKey, Meta: fields.metaKey };
+		return new Proxy(event, {
+			get(target, key) {
+				if (Object.hasOwn(fields, key)) return fields[key];
+				if (key === "getModifierState")
+					return (name) => (Object.hasOwn(modifier, name) ? modifier[name] : target.getModifierState(name));
+				const value = get(target, key, target);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+	};
+	const dispatch = (listener, receiver, event) => {
+		let delivered = event;
+		let original = null;
+		for (const rule of currentRules()) {
+			if (!matches(rule.when, event)) continue;
+			if (!rule.deliver) return undefined;
+			original = rule.deliver.shortcut;
+			delivered = disguise(event, rule.deliver.fields);
+			break;
+		}
+		const prevented = event.defaultPrevented;
+		const stopped = event.cancelBubble;
+		try {
+			return typeof listener === "function"
+				? apply(listener, receiver, [delivered])
+				: listener.handleEvent(delivered);
+		} finally {
+			if ((!prevented && event.defaultPrevented) || (!stopped && event.cancelBubble)) {
+				const shortcut = original ?? {
+					mods: { ctrl: !!event.ctrlKey, alt: !!event.altKey, shift: !!event.shiftKey, meta: !!event.metaKey },
+					code: event.code || null,
+					key: event.code ? null : keyOf(event.key),
+				};
+				try {
+					report(JSON.stringify(shortcut));
+				} catch {}
+			}
+		}
+	};
+	const capture = (options) => (typeof options === "boolean" ? options : !!(options && options.capture));
+	const wrapperFor = (listener, type, options, create) => {
+		let byType = wrappers.get(listener);
+		if (!byType) {
+			if (!create) return listener;
+			byType = new Map();
+			wrappers.set(listener, byType);
+		}
+		const id = type + ":" + capture(options);
+		let wrapper = byType.get(id);
+		if (!wrapper && create) {
+			wrapper = function (event) {
+				return dispatch(listener, this, event);
+			};
+			byType.set(id, wrapper);
+		}
+		return wrapper ?? listener;
+	};
+	const wrappable = (type, listener) =>
+		types.has(String(type)) && listener !== null && (typeof listener === "function" || typeof listener === "object");
+	defineProperty(proto, "addEventListener", {
+		value: function addEventListener(type, listener, options) {
+			if (wrappable(type, listener)) listener = wrapperFor(listener, String(type), options, true);
+			return apply(add, this, [type, listener, options]);
+		},
+		writable: true,
+		configurable: true,
+	});
+	defineProperty(proto, "removeEventListener", {
+		value: function removeEventListener(type, listener, options) {
+			if (wrappable(type, listener)) listener = wrapperFor(listener, String(type), options, false);
+			return apply(remove, this, [type, listener, options]);
+		},
+		writable: true,
+		configurable: true,
+	});
+})`;
+
 let installed = false;
-export function createScriptSandbox(apis, { legacy = false } = {}) {
+export function createScriptSandbox(
+	apis,
+	{ legacy = false, keyboard = undefined } = {},
+) {
 	if (typeof windowGetter !== "function")
 		throw new Error(
 			"Safe Window branding is unavailable; refusing privileged script execution",
@@ -245,6 +369,8 @@ export function createScriptSandbox(apis, { legacy = false } = {}) {
 	);
 	linkScope(environment, scopeKey);
 	environment.evaluate(`delete globalThis[${JSON.stringify(scopeKey)}]`);
+	if (keyboard)
+		environment.evaluate(KEYBOARD_BOOTSTRAP)(keyboard.rules, keyboard.report);
 	const header = legacy ? "" : '"use strict";\n';
 	let disposed = false;
 	return {

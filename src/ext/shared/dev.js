@@ -106,7 +106,53 @@ const _browser = {
 				response = { success: true };
 			}
 			if (name === "UE_MENU_LIST") {
-				response = { ok: true, scripts: [] };
+				const mods = (alt = false, shift = false, ctrl = false) => ({
+					ctrl,
+					alt,
+					shift,
+					meta: false,
+				});
+				response = {
+					ok: true,
+					scripts: [
+						{
+							scriptId: "granted-demo",
+							filename: "Granted Demo Script.user.js",
+							tabId: 1,
+							frameId: 0,
+							documentId: "dev",
+							commands: [],
+							shortcuts: {
+								editable: true,
+								list: [
+									{
+										id: "Alt+Shift+KeyM",
+										source: "detected",
+										shortcut: {
+											mods: mods(true, true),
+											code: "KeyM",
+											key: null,
+										},
+									},
+									{
+										id: "key:]",
+										source: "detected",
+										shortcut: { mods: mods(), code: null, key: "]" },
+									},
+									{
+										id: "Ctrl+KeyJ",
+										source: "observed",
+										shortcut: {
+											mods: mods(false, false, true),
+											code: "KeyJ",
+											key: null,
+										},
+									},
+								],
+							},
+						},
+					],
+				};
 			}
 			if (!responseCallback) {
 				return new Promise((resolve) => {

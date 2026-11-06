@@ -1,6 +1,14 @@
 <script>
 	import { onDestroy } from "svelte";
-	onDestroy(() => clearTimeout(feedbackTimer));
+	import {
+		sameShortcut,
+		shortcutFromEvent,
+		shortcutLabel,
+	} from "@ext/shortcuts.js";
+	onDestroy(() => {
+		clearTimeout(feedbackTimer);
+		stopRecording();
+	});
 	export let item;
 	export let groups = [];
 	export let toggle;
@@ -9,7 +17,7 @@
 	export let detail = false;
 	export let open;
 	export let back;
-	/** @type {{autoPopup?: boolean, legacyMode?: boolean}} */
+	/** @type {{autoPopup?: boolean, legacyMode?: boolean, shortcuts?: object}} */
 	export let preferences = {};
 	export let setPreference = async () => {};
 	export let openInManager = () => {};
@@ -29,15 +37,83 @@
 	);
 	$: autoPopup = preferences?.autoPopup !== false;
 	$: legacyMode = preferences?.legacyMode === true;
+	// Prefer the top frame's report; every frame runs the same detection.
+	$: shortcutInfo =
+		[...groups]
+			.sort((a, b) => a.frameId - b.frameId)
+			.find((group) => group.shortcuts?.list?.length)?.shortcuts ?? null;
+	$: shortcutSettings = preferences?.shortcuts ?? {};
+	$: hasCommands = groups.some((group) => group.commands?.length);
 	$: subtitle = item.disabled
 		? "已停用"
 		: groups.some((group) => group.panel)
 			? "控制面板"
-			: groups.length
+			: hasCommands
 				? "脚本操作"
-				: pageWorld
-					? "页面脚本 · 点按查看设置"
-					: "暂无工具栏操作 · 点按查看设置";
+				: shortcutInfo
+					? `${shortcutInfo.list.length} 个快捷键`
+					: pageWorld
+						? "页面脚本 · 点按查看设置"
+						: "暂无工具栏操作 · 点按查看设置";
+
+	// ---- shortcuts ----
+	let recording = "";
+	let shortcutMessage = "";
+	const settingFor = (settings, entry) => settings[entry.id] ?? {};
+	async function saveShortcut(entry, change) {
+		const next = { ...shortcutSettings };
+		const merged = { ...settingFor(next, entry), ...change };
+		merged.original = entry.shortcut;
+		if (!merged.disabled && !merged.to) delete next[entry.id];
+		else next[entry.id] = merged;
+		await setPreference("shortcuts", next);
+	}
+	function toggleShortcut(entry, enabled) {
+		shortcutMessage = "";
+		return saveShortcut(entry, { disabled: !enabled });
+	}
+	function resetShortcut(entry) {
+		shortcutMessage = "";
+		return saveShortcut(entry, { to: null, disabled: false });
+	}
+	const modifierKeys = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock"]);
+	let onRecordKey;
+	function stopRecording() {
+		if (onRecordKey) window.removeEventListener("keydown", onRecordKey, true);
+		onRecordKey = undefined;
+		recording = "";
+	}
+	function startRecording(entry) {
+		stopRecording();
+		shortcutMessage = "";
+		recording = entry.id;
+		onRecordKey = async (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			if (modifierKeys.has(event.key)) return;
+			const plain =
+				!event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey;
+			if (event.key === "Escape" && plain) return stopRecording();
+			const next = shortcutFromEvent(event);
+			if (!next) return;
+			const clash = shortcutInfo.list.find(
+				(other) =>
+					other.id !== entry.id &&
+					(sameShortcut(
+						settingFor(shortcutSettings, other).to ?? other.shortcut,
+						next,
+					) ||
+						sameShortcut(other.shortcut, next)),
+			);
+			stopRecording();
+			if (clash) {
+				shortcutMessage = `${shortcutLabel(next)} 已被此脚本的「${shortcutLabel(clash.shortcut)}」使用，未修改。`;
+				return;
+			}
+			await saveShortcut(entry, { to: next, disabled: false });
+		};
+		window.addEventListener("keydown", onRecordKey, true);
+	}
 
 	async function changeAutoPopup(event) {
 		const value = event.currentTarget.checked;
@@ -247,6 +323,67 @@
 					</div>
 				{/if}
 			{/each}
+		{/if}
+		{#if !item.disabled && shortcutInfo}
+			<div class="control-section shortcuts">
+				<h3>快捷键</h3>
+				{#each shortcutInfo.list as entry (entry.id)}
+					{@const setting = settingFor(shortcutSettings, entry)}
+					<div class="control-row shortcut-row">
+						<div class="shortcut-keys">
+							<kbd class:off={setting.disabled || setting.to}
+								>{shortcutLabel(entry.shortcut)}</kbd
+							>
+							{#if setting.to && !setting.disabled}<span aria-hidden="true"
+									>→</span
+								><kbd>{shortcutLabel(setting.to)}</kbd>{/if}
+							<small
+								>{entry.source === "observed"
+									? "使用中发现"
+									: "代码中检测"}</small
+							>
+						</div>
+						{#if shortcutInfo.editable}
+							<div class="shortcut-actions">
+								{#if recording === entry.id}
+									<button class="mini recording" on:click={stopRecording}
+										>按下新组合…</button
+									>
+								{:else}
+									<button
+										class="mini"
+										disabled={disabled || setting.disabled}
+										on:click={() => startRecording(entry)}>改键</button
+									>
+									{#if setting.to}<button
+											class="mini"
+											{disabled}
+											on:click={() => resetShortcut(entry)}>还原</button
+										>{/if}
+								{/if}
+								<input
+									type="checkbox"
+									role="switch"
+									aria-label={`启用快捷键 ${shortcutLabel(entry.shortcut)}`}
+									checked={!setting.disabled}
+									{disabled}
+									on:change={(event) =>
+										toggleShortcut(entry, event.currentTarget.checked)}
+								/>
+							</div>
+						{/if}
+					</div>
+				{/each}
+				{#if shortcutMessage}<p class="meta error">{shortcutMessage}</p>{/if}
+				<p class="meta">
+					{#if shortcutInfo.editable}
+						“代码中检测”为自动推测；其他快捷键在你实际使用后会出现。改键、停用即时生效，录制时按
+						Esc 取消。
+					{:else}
+						页面环境脚本只能显示快捷键，无法改键或停用。
+					{/if}
+				</p>
+			</div>
 		{/if}
 		<div class="control-section settings">
 			<h3>脚本设置</h3>
@@ -556,6 +693,68 @@
 	.meta {
 		margin: 0;
 		padding: 8px 12px 10px;
+	}
+
+	.shortcut-row {
+		gap: 8px;
+	}
+
+	.shortcut-keys {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+		font-size: 12px;
+	}
+
+	.shortcut-keys small {
+		color: var(--text-color-secondary);
+		font-size: 11px;
+	}
+
+	kbd {
+		border: 1px solid var(--border-color);
+		border-radius: 5px;
+		background: var(--color-bg-secondary);
+		padding: 1px 6px;
+		font:
+			12px/1.5 ui-monospace,
+			monospace;
+	}
+
+	kbd.off {
+		text-decoration: line-through;
+		opacity: 0.6;
+	}
+
+	.shortcut-actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-shrink: 0;
+	}
+
+	.mini {
+		border: 1px solid var(--border-color);
+		border-radius: 6px;
+		padding: 2px 8px;
+		background: var(--color-bg-secondary);
+		color: var(--text-color-primary);
+		font-size: 11px;
+	}
+
+	.mini.recording {
+		border-color: var(--color-blue);
+		color: var(--color-blue);
+	}
+
+	.mini:disabled {
+		opacity: 0.5;
+	}
+
+	.meta.error {
+		color: var(--color-red);
 	}
 
 	.warning {
