@@ -9,7 +9,7 @@
 	export let detail = false;
 	export let open;
 	export let back;
-	/** @type {{autoPopup?: boolean}} */
+	/** @type {{autoPopup?: boolean, legacyMode?: boolean}} */
 	export let preferences = {};
 	export let setPreference = async () => {};
 	export let openInManager = () => {};
@@ -18,11 +18,17 @@
 
 	$: metadata = item.metadata ?? {};
 	$: grants = metadata.grant ?? [];
-	$: pageWorld = (metadata["inject-into"]?.[0] ?? "auto") === "page";
+	$: injectInto = metadata["inject-into"]?.[0] ?? "auto";
+	// Same rule as the content script: "auto" with real grants runs isolated.
+	$: pageWorld =
+		injectInto === "page" ||
+		(injectInto === "auto" &&
+			!grants.some((grant) => grant && grant !== "none"));
 	$: menuGranted = grants.some((grant) =>
 		["GM_registerMenuCommand", "GM.registerMenuCommand"].includes(grant),
 	);
 	$: autoPopup = preferences?.autoPopup !== false;
+	$: legacyMode = preferences?.legacyMode === true;
 	$: subtitle = item.disabled
 		? "已停用"
 		: groups.some((group) => group.panel)
@@ -38,6 +44,25 @@
 		await setPreference("autoPopup", value);
 		prefsChanged = true;
 	}
+	let confirmLegacy = false;
+	async function changeLegacyMode(event) {
+		const input = event.currentTarget;
+		if (input.checked) {
+			// Turning isolation off needs an explicit second step.
+			input.checked = false;
+			confirmLegacy = true;
+			return;
+		}
+		confirmLegacy = false;
+		await setPreference("legacyMode", false);
+		prefsChanged = true;
+	}
+	async function enableLegacyMode() {
+		confirmLegacy = false;
+		await setPreference("legacyMode", true);
+		prefsChanged = true;
+	}
+
 	let feedbackTimer;
 	let running = "";
 	let feedback = "";
@@ -240,6 +265,36 @@
 					on:change={changeAutoPopup}
 				/>
 			</div>
+			{#if !pageWorld}
+				<div class="control-row">
+					<label for={`legacy-mode-${item.filename}`}
+						>兼容模式（不安全）<small
+							>给旧脚本用：以非严格模式运行，可修复“变量未定义”一类错误，但会关闭此脚本的安全隔离。</small
+						></label
+					>
+					<input
+						id={`legacy-mode-${item.filename}`}
+						type="checkbox"
+						role="switch"
+						checked={legacyMode}
+						{disabled}
+						on:change={changeLegacyMode}
+					/>
+				</div>
+				{#if confirmLegacy}
+					<div class="warning" role="alert">
+						<p>
+							兼容模式会关闭此脚本的安全隔离：脚本将能直接使用扩展权限（读取其他脚本的数据、绕过网络授权）。只在你完全信任此脚本、且它在默认模式下出错时开启。
+						</p>
+						<div class="warning-actions">
+							<button class="danger" on:click={enableLegacyMode}
+								>仍然开启</button
+							>
+							<button on:click={() => (confirmLegacy = false)}>取消</button>
+						</div>
+					</div>
+				{/if}
+			{/if}
 			{#if prefsChanged}
 				<button class="action" on:click={reloadPage}
 					><span>刷新网页使设置生效</span><span
@@ -255,8 +310,11 @@
 				></button
 			>
 			<p class="meta">
-				运行环境：{pageWorld ? "页面（page）" : "隔离环境（content）"}{metadata
-					.version?.[0]
+				运行环境：{pageWorld
+					? "页面（page）"
+					: legacyMode
+						? "兼容模式（未隔离）"
+						: "隔离环境（content）"}{metadata.version?.[0]
 					? ` · 版本 ${metadata.version[0]}`
 					: ""}
 			</p>
@@ -498,6 +556,37 @@
 	.meta {
 		margin: 0;
 		padding: 8px 12px 10px;
+	}
+
+	.warning {
+		padding: 10px 12px;
+		border-bottom: 1px solid var(--border-color);
+		color: var(--color-red);
+		font-size: 12px;
+		line-height: 1.5;
+	}
+
+	.warning p {
+		margin: 0 0 8px;
+	}
+
+	.warning-actions {
+		display: flex;
+		gap: 8px;
+	}
+
+	.warning-actions button {
+		border: 1px solid var(--border-color);
+		border-radius: 6px;
+		padding: 4px 10px;
+		background: var(--color-bg-secondary);
+		color: var(--text-color-primary);
+		font-size: 12px;
+	}
+
+	.warning-actions .danger {
+		border-color: var(--color-red);
+		color: var(--color-red);
 	}
 
 	.feedback {

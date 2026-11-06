@@ -45,6 +45,23 @@ await probe('bare top', () => read(top));
 await probe('realm top', () => read(Function('return top')()));
 await probe('top descriptor', () => read(Object.getOwnPropertyDescriptor(Function('return this')(), 'top').get.call(Function('return this')())));
 await probe('parent', () => read(window.parent));
+await probe('bare top', () => read(top));
+await probe('realm Function', () => read(Function('return top')()));
+await probe('Function this', () => read(Function('return this')().top));
+await probe('indirect eval', () => read((0, eval)('top')));
+await probe('function constructor', () => read((function () {}).constructor('return top')()));
+await probe('async constructor', async () => read(await Object.getPrototypeOf(async function () {}).constructor('return top')()));
+await probe('generator constructor', () => read(Object.getPrototypeOf(function* () {}).constructor('yield top')().next().value));
+await probe('host constructor', () => read(document.createElement.constructor('return top')()));
+await probe('sloppy this', () => read(Reflect.apply(function () { return this; }, undefined, []).top));
+await probe('defaultView top', () => read(document.defaultView.top));
+await probe('top descriptor getter', () => { const d = Object.getOwnPropertyDescriptor(window, 'top'); return read(d.get ? d.get.call(undefined) : d.value); });
+await probe('globalThis descriptor', () => read(Object.getOwnPropertyDescriptor(window, 'globalThis').value.top));
+await probe('string timer', () => new Promise((resolve) => {
+  setTimeout("document.documentElement.dataset.ueTimer = typeof browser === 'object' && browser && browser.storage ? 'leak' : 'safe'", 0);
+  setTimeout(() => resolve(document.documentElement.dataset.ueTimer === 'leak' ? 'synthetic-other-script-secret' : 'blocked'), 30);
+}));
+await probe('dynamic import', async () => read((await import('data:text/javascript,export default top')).default));
 const own = GM_getValue('own');
 await GM.setValue('nested', {array:[1,{ok:true}]});
 const stored = GM_getValue('nested');
@@ -61,6 +78,9 @@ Object.prototype.uePollution = 'attacker-only';
 const report = {completed:true,results,own,stored,dom:el.textContent};
 const output=document.createElement('pre'); output.id='isolation-result';output.textContent=JSON.stringify(report);document.body.append(output);
 `;
+
+// Every probe must report; the audits require exactly this many results.
+export const probeCount = attackSource.match(/await probe\(/g).length;
 
 export function isolationScripts() {
 	return [

@@ -57,7 +57,7 @@ const source = `(() => {
  };
  ${await buildEngine()}
  const message = async value => {for(const fn of handlers){const result=fn(value,{id:'enhanced'});if(result!==undefined)return await result;}};
- const count=()=>{let n=0;const walk=r=>{for(const e of r.querySelectorAll('*')){n++;if(e.shadowRoot)walk(e.shadowRoot);}};walk(document);return n;};
+ const attackOut=()=>document.body.dataset.attack;const count=()=>{let n=0;const walk=r=>{for(const e of r.querySelectorAll('*')){n++;if(e.shadowRoot)walk(e.shadowRoot);}};walk(document);return n;};
  setTimeout(async()=>{
   try{
    const before=count();
@@ -75,7 +75,7 @@ const source = `(() => {
    const snapshot=await message({name:'UE_MENU_SNAPSHOT'});
    const runs={};
    for(const s of snapshot.scripts)for(const c of s.commands){if(!/^(显示|打开)/.test(c.title))continue;const b=count();const r=await message({name:'UE_MENU_EXECUTE',documentId:snapshot.documentId,scriptId:s.scriptId,commandId:c.commandId});await new Promise(r=>setTimeout(r,200));runs[c.title]={result:r,added:count()-b};}
-   finish({passed:true,before,afterClick,afterKey,html0,htmlAfter:document.body.innerHTML.length,ds:{...document.body.dataset},
+   finish({passed:true,attack:attackOut()?JSON.parse(attackOut()):null,before,afterClick,afterKey,html0,htmlAfter:document.body.innerHTML.length,ds:{...document.body.dataset},
     runs,menus:snapshot.scripts.map(s=>({scriptId:s.scriptId,commands:s.commands.map(c=>c.title),panel:!!s.panel})),
     errors,warns:warns.slice(0,20)});
   }catch(e){finish({passed:false,error:String(e.stack??e),errors});}

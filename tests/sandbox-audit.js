@@ -4,6 +4,7 @@ import { start } from "./helpers/engine-harness.js";
 import {
 	initialValues,
 	isolationScripts,
+	probeCount,
 } from "./helpers/isolation-scenarios.js";
 
 const audit = await start(isolationScripts(), initialValues);
@@ -53,7 +54,7 @@ const negativeControl =
 const passed =
 	negativeControl &&
 	evidence?.completed === true &&
-	evidence.results.length === 16 &&
+	evidence.results.length === probeCount &&
 	evidence.results.every((item) => item.blocked) &&
 	callbacks &&
 	JSON.stringify(evidence.own) === JSON.stringify({ allowed: [1, true] }) &&

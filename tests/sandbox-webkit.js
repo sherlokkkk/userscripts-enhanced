@@ -5,6 +5,7 @@ import { buildEngine } from "./helpers/engine-harness.js";
 import {
 	initialValues,
 	isolationScripts,
+	probeCount,
 } from "./helpers/isolation-scenarios.js";
 const source = `(() => {
  const finish = window.webkit.messageHandlers.result.postMessage.bind(window.webkit.messageHandlers.result);
@@ -37,7 +38,7 @@ const source = `(() => {
    const panel=await send(state.panel.controls[0].commandId,true);
    const el=document.getElementById('isolation-dom');
    const callbacks=menu.ok&&panel.ok&&el.dataset.clicked==='yes'&&el.dataset.enabled==='true';
-   const passed=evidence.completed&&evidence.results.length===16&&evidence.results.every(x=>x.blocked)&&callbacks&&
+   const passed=evidence.completed&&evidence.results.length===${probeCount}&&evidence.results.every(x=>x.blocked)&&callbacks&&
     JSON.stringify(evidence.own)===JSON.stringify({allowed:[1,true]})&&JSON.stringify(evidence.stored)===JSON.stringify({array:[1,{ok:true}]})&&
     window.privateMarker===undefined&&Object.prototype.uePollution===undefined;
    finish({passed,evidence,callbacks,errors,engine:'WKWebView isolated WKContentWorld',safariVerified:false,method:'Unmodified compiled production entry and DOM membrane. Synthetic WebExtension APIs; real WebKit realms, DOM, menu and panel callbacks.'});

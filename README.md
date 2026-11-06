@@ -2,7 +2,13 @@
 
 基于 [quoid/userscripts](https://github.com/quoid/userscripts)，锁定上游 Commit `8b743e37dd7dfc8a510aff4e5e2ab8b1cc9210df`。沿用 Svelte、Vite、CodeMirror、Swift 和 Manifest V2，许可证保持 GPL-3.0。
 
-**当前不是完整兼容、可安全日用的正式版。Build 5 发现隔离 realm 可经 iframe 的 `top` 直达扩展 API，隔离门禁失败（见安全模型）：只安装你信任的脚本。不得将构建成功或模拟消息测试当作 Safari 验收通过。**
+**当前不是完整兼容、可安全日用的正式版。Build 6 封堵了 Build 5 发现的隔离绕过（JSDOM 与真实 WebKit 审计 30 条攻击路径全部阻断），但 Safari 扩展端到端对抗验收尚未完成。不得将构建成功或模拟消息测试当作 Safari 验收通过。**
+
+## Build 6：脚本隔离加固
+
+- 修复隔离 realm 可经 iframe 的 `top` 直达扩展 API 的漏洞（共 19 条利用路径，含 `setTimeout("字符串")` 直接在扩展环境执行代码）。做法见[安全模型](docs/security-model.md)。
+- 有权限脚本默认以严格模式运行；旧脚本出错时可在弹窗“脚本设置”中对单个脚本开启“兼容模式（不安全）”，需二次确认。
+- 不支持动态 `import()`；`eval` 不能访问调用处局部变量。
 
 ## Build 5：脚本兼容与弹窗设置
 

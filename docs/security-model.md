@@ -1,20 +1,34 @@
 # 安全模型与阻塞项
 
-## Build 5：发现的新绕过（未修复，安全门禁失败）
+## Build 6：封堵 realm 全局对象与 `top` 绕过
 
-**隔离 realm 的 iframe 自身的 `top` 指向有特权的 content-script window。** `top` 是 Window 的不可伪造（unforgeable）属性，膜无法重映射。在脚本 realm 中执行 `Function('return top')().browser`，或通过 `Object.getOwnPropertyDescriptor(<realm global>, 'top').get` 取值，都能直接拿到原始 `browser` 扩展 API 和特权 realm 的 `Function` 构造器。Build 4 的 11 条攻击路径没有覆盖这一点；Build 5 将其加入两个审计（共 16 条），`realm top` 和 `top descriptor` 两条目前**不能阻断**，因此 `audit:sandbox:webkit` 结果为失败（JSDOM 不实现这一 WebKit 行为，审计仍通过，不能以此为准）。
+**问题（Build 5 发现）：** 隔离 realm 是一个 iframe，它自己的不可伪造属性 `top` 指向有特权的 content-script window。只要脚本拿到 realm 的“原始全局对象”或能在 realm 全局作用域执行代码，就能经 `top` 直接取得 `browser` 扩展 API。实测共有 19 条路径（`Function('return top')`、间接 `eval`、各类函数构造器、非严格模式 `this`、`document.defaultView`、属性描述符的 getter、`setTimeout("字符串")`、`import()` 等），其中 `setTimeout("字符串")` 甚至直接在扩展 content world 执行代码。
 
-已尝试且行不通的修复（WebKit 实测）：
+**修复（不依赖 Safari 扩展环境的细节，全部在 realm 一侧完成）：**
 
-- `keepAlive: false`（分离 iframe）：`top` 变为 null，但 WebKit 不再执行分离 realm 的 promise 回调，`await` 一个被拒绝的 promise 后脚本永远不会恢复，普通 async 脚本会静默卡住。
-- 设置 realm 文档的 `document.domain`：沙箱 iframe 禁止该 setter；即使去掉 sandbox 属性，扩展隔离世界中 `top.document` 仍可访问。
+1. 自建 realm（`src/ext/content-scripts/realm.js`，沿用 near-membrane-base）：宿主 window 进入 realm 时不再对应 realm 的原始全局对象，而对应脚本自己的窗口代理（scope）。所以 `document.defaultView`、`event.view`、`MessageEvent.source`、`e.currentTarget` 都是 scope，`document.defaultView === window` 也因此为 true。`Function` 只做 realm→宿主方向的对应，宿主函数的 `.constructor` 不再变成 realm 的真 `Function`。
+2. 失真回调拒绝所有宿主端的代码编译入口：宿主 `Function`、`eval`、async/generator 函数构造器，宿主 `setTimeout`/`setInterval` 只接受函数。
+3. realm 内的 `Function`、`eval`、`Function.prototype.constructor` 及 async/generator 变体都换成安全版本，在 scope 内编译（逃逸出内层函数也仍在外层 scope 函数里）；字符串定时器经同一编译器执行。
+4. 脚本默认以**严格模式**运行，不存在非严格函数 `this` 回落到原始全局对象的路径。
+5. scope 代理以空白对象为目标，`top/window/self/globalThis/frames/parent/location/document` 的属性描述符只返回安全值，`Object.keys(window)`、`for…in` 照常可用。
+6. `import()` 会在 realm 全局作用域执行模块，而 WebKit 让扩展世界不受 CSP 约束（实测 meta CSP 对其无效），因此参照 SES，把源码中所有 `import` 后接 `(`（中间可有空白、注释、HTML 注释）的写法改写为一个会拒绝的函数调用，所有编译入口都经过此改写。字符串里刚好出现 `import(` 文字时也会被改写，只影响文字，不影响能力。
 
-结论：在 Safari 扩展的 content world 中，当前方案**不是安全边界**，只能防止误用，不能防止恶意脚本拿到扩展能力。仅安装你信任的脚本。真正修复需要另行设计（例如捕获后从 content world 移除扩展全局并冻结特权 realm 的内建原型，或改为页面世界 + 受控消息桥），作为后续工作。
+**验证：** 两个审计（JSDOM 与真实 WebKit）现各含 30 条攻击路径（新增 14 条 top/编译器/定时器/import 路径），全部阻断，菜单、面板回调与 GM 存储等正向检查通过；JSDOM 负对照（恢复旧执行路径）仍能检出泄漏。`tests/sandbox-hardening.test.js` 覆盖 import 改写、严格/兼容模式、安全编译器。
+
+**兼容性代价：**
+
+- 严格模式下给未声明变量赋值（`x = 1`）会抛 ReferenceError；`with` 语句、八进制字面量等严格模式禁止的语法不可用。
+- `eval` 不能读写调用处的局部变量（等同间接 eval，在脚本作用域执行）；语句形式的 `eval` 返回 undefined。
+- 不支持动态 `import()`。`Object.getOwnPropertyDescriptor(window, …)` 对上述特殊属性报告 configurable: true。
+
+**兼容模式（每个脚本单独开启，弹窗“脚本设置”）：** 给因严格模式出错的旧脚本使用，以非严格模式运行。非严格函数无接收者调用时 `this` 是 realm 原始全局对象，因此**开启兼容模式的脚本不受隔离保护**，界面会明确警告并要求二次确认。
+
+**仍未证明：** 以上在真实 WebKit（WKWebView 隔离世界）验证，Safari 扩展端到端的对抗验收仍待完成；有限攻击清单通过不等于证明不存在其他逃逸。
 
 ## Build 5：兼容性修复
 
 - 脚本以 `window/self/globalThis/top/parent/frames/location` 绑定到一个窗口代理的方式执行：顶层 frame 中 `window.top === window.self`（Click Fx、Boss Key 等脚本开头的 frame 判断此前恒为“不在顶层”，脚本直接退出），`location` 为网页实时地址（此前是 realm 创建时的快照，单页应用导航后过期）。iframe 内脚本的 `top` 为不透明对象，仍判定为“不在顶层”。
-- 已知差异：`document.defaultView`、`event.view` 返回 realm 全局而非该代理（`=== window` 为 false）；`document.location` 仍是快照，请用 `location`。
+- 已知差异：`document.location` 仍是快照，请用 `location`。（Build 6 起 `document.defaultView`、`event.view` 与 `window` 为同一对象。）
 - `structuredClone`、`postMessage`、`history.pushState/replaceState`、`BroadcastChannel/MessagePort/Worker.postMessage` 收到脚本 realm 的普通对象时，原生实现会抛 DataCloneError。content world 中这些 API 在 DataCloneError 时改用宿主副本重试（原始值、数组、普通对象、Date、Map、Set）；函数等本来不可克隆的值仍抛原错误。该包装只在扩展 content world，网页不受影响。
 - `@inject-into page` 脚本可声明菜单 grant：`GM_registerMenuCommand` 等通过每次注入随机命名的 CustomEvent 传 JSON（标题、选项、键），点击时回传键，不传任何扩展能力。网页若抢先劫持 `dispatchEvent` 可伪造该脚本的菜单项（只影响显示的标题；点击仍只是向网页派发事件），这一点已知并接受。
 

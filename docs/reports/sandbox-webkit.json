@@ -20,14 +20,28 @@
 			{ "blocked": true, "name": "event view" },
 			{ "blocked": true, "name": "window.top" },
 			{ "blocked": true, "name": "bare top" },
-			{ "blocked": false, "name": "realm top" },
-			{ "blocked": false, "name": "top descriptor" },
-			{ "blocked": true, "name": "parent" }
+			{ "blocked": true, "name": "realm top" },
+			{ "blocked": true, "name": "top descriptor" },
+			{ "blocked": true, "name": "parent" },
+			{ "blocked": true, "name": "bare top" },
+			{ "blocked": true, "name": "realm Function" },
+			{ "blocked": true, "name": "Function this" },
+			{ "blocked": true, "name": "indirect eval" },
+			{ "blocked": true, "name": "function constructor" },
+			{ "blocked": true, "name": "async constructor" },
+			{ "blocked": true, "name": "generator constructor" },
+			{ "blocked": true, "name": "host constructor" },
+			{ "blocked": true, "name": "sloppy this" },
+			{ "blocked": true, "name": "defaultView top" },
+			{ "blocked": true, "name": "top descriptor getter" },
+			{ "blocked": true, "name": "globalThis descriptor" },
+			{ "blocked": true, "name": "string timer" },
+			{ "blocked": true, "name": "dynamic import" }
 		],
 		"stored": { "array": [1, { "ok": true }] }
 	},
 	"method": "Unmodified compiled production entry and DOM membrane. Synthetic WebExtension APIs; real WebKit realms, DOM, menu and panel callbacks.",
-	"passed": false,
+	"passed": true,
 	"safariVerified": false,
-	"checkedAt": "2026-11-06T08:18:29.462Z"
+	"checkedAt": "2026-11-06T08:45:38.189Z"
 }

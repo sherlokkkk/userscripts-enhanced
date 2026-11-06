@@ -316,6 +316,17 @@ const _browser = {
 							subframe: true,
 							type: "js",
 						},
+						{
+							name: "Granted Demo Script",
+							filename: "Granted Demo Script.user.js",
+							scriptId: "granted-demo",
+							disabled: false,
+							type: "js",
+							metadata: {
+								grant: ["GM_getValue", "GM_registerMenuCommand"],
+								version: ["1.0"],
+							},
+						},
 					],
 				};
 			} else if (name === "POPUP_UPDATES") {

@@ -23,10 +23,18 @@ let cspFallbackAttempted = false;
 
 const SCRIPT_PREFS_KEY = "UE_SCRIPT_PREFS";
 let preferences = {};
-function scriptPreferences(scriptId) {
-	const own = Object.hasOwn(preferences, scriptId) ? preferences[scriptId] : {};
-	return Object.freeze({ autoPopup: own?.autoPopup !== false });
+function ownPreferences(scriptId) {
+	return Object.hasOwn(preferences, scriptId)
+		? (preferences[scriptId] ?? {})
+		: {};
 }
+function scriptPreferences(scriptId) {
+	return Object.freeze({
+		autoPopup: ownPreferences(scriptId).autoPopup !== false,
+	});
+}
+// Popup "兼容模式": run this script in sloppy mode, without isolation.
+const legacyMode = (scriptId) => ownPreferences(scriptId).legacyMode === true;
 const pageMenuGrants = new Set([
 	"GM_registerMenuCommand",
 	"GM_unregisterMenuCommand",
@@ -223,7 +231,9 @@ ${userscript.code}
 			const existing = sandboxContexts.find(
 				(context) => context.filename === filename,
 			);
-			const sandbox = existing?.sandbox ?? createScriptSandbox(userscript.apis);
+			const sandbox =
+				existing?.sandbox ??
+				createScriptSandbox(userscript.apis, { legacy: legacyMode(scriptId) });
 			if (!existing) sandboxContexts.push({ filename, sandbox });
 			sandbox.evaluate(code);
 		} catch (error) {
