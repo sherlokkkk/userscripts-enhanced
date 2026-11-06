@@ -1,6 +1,6 @@
 # Userscripts Enhanced 0.1.0 — 开发预览
 
-基于 [quoid/userscripts](https://github.com/quoid/userscripts)，锁定上游 Commit `8b743e37dd7dfc8a510aff4e5e2ab8b1cc9210df`。沿用 Svelte、Vite、CodeMirror、Swift 和 Manifest V2，许可证保持 GPL-3.0。
+**非官方分支。** 基于 [quoid/userscripts](https://github.com/quoid/userscripts)，锁定上游 Commit `8b743e37dd7dfc8a510aff4e5e2ab8b1cc9210df`。沿用 Svelte、Vite、CodeMirror、Swift 和 Manifest V2，许可证保持 GPL-3.0。
 
 **当前不是完整兼容、可安全日用的正式版。Build 6 封堵了 Build 5 发现的隔离绕过（JSDOM 与真实 WebKit 审计 30 条攻击路径全部阻断），但 Safari 扩展端到端对抗验收尚未完成。不得将构建成功或模拟消息测试当作 Safari 验收通过。**
 
@@ -21,14 +21,13 @@
 - 修复脚本向 `postMessage`、`structuredClone`、`history.pushState` 等传普通对象时的 DataCloneError。
 - 弹窗脚本详情新增“脚本设置”：允许自动弹出页面面板（经 `GM_info.preferences.autoPopup` 传给脚本）、在管理页中打开此脚本、刷新网页；无操作的脚本会说明原因。
 - `@inject-into page` 脚本可注册工具栏菜单命令。
-- 新增 `tests/user-scripts-webkit.js`：用生产入口在真实 WebKit 中运行 `tests/local/final-scripts` 下的脚本，报告错误、已注册菜单和 DOM 效果。
+- 新增 `tests/user-scripts-webkit.js`：用生产入口在真实 WebKit 中运行指定目录下的脚本，报告错误、已注册菜单和 DOM 效果。
 
 ## Build 4：脚本隔离
 
 每个有权限脚本使用独立 realm 和 DOM 膜，GM/UE 能力按 grant 传入；禁止直接扩展 API 和外部 Window。详情及限制见 [安全模型](docs/security-model.md)。
 
 ## Build 3：弹窗与脚本接口
-
 
 ## 已接通的功能
 
@@ -44,11 +43,9 @@
 
 这些条目表示有真实执行路径，覆盖和验收状态以 [逐项验收](docs/acceptance.md) 为准。
 
-## 本机位置
+## 构建
 
-维护中的工程：`Userscripts-Enhanced`。原工作区的 `Userscripts-Enhanced-local` 链接指向它。桌面原 `Userscripts-Enhanced` 目录保留初期审计副本和完整上游历史，请勿继续在该旧副本编辑。
-
-Xcode 工程：`xcode/Userscripts.xcodeproj`，Scheme `Mac`。独立 Debug 应用安装位置：`~/Applications/Userscripts Enhanced Debug.app`。
+Xcode 工程：`xcode/Userscripts.xcodeproj`，Scheme `Mac`。安装脚本把独立 Debug 应用放到 `~/Applications/Userscripts Enhanced Debug.app`，与 App Store 原版的标识和数据分开。
 
 ```sh
 npm ci
@@ -56,7 +53,7 @@ npm run build:mac-safari-16.4
 ./scripts/build-enhanced.sh Debug
 ```
 
-本机已配置现有开发证书的 Team（忽略的 `xcode/xcconfig/Userscripts-Enhanced.dev.xcconfig`）。其他机器应按 [构建指南](docs/build-guide.md) 配置自己的 Team，不能复制签名私钥。
+签名 Team 写在被 git 忽略的 `xcode/xcconfig/Userscripts-Enhanced.dev.xcconfig`，按 [构建指南](docs/build-guide.md) 配置你自己的 Team。
 
 ```sh
 npm run lint:js
@@ -73,11 +70,7 @@ npm run audit:sandbox
 
 先阅读 [安全模型](docs/security-model.md)。系统权限由用户本人确认；本项目没有更改 Safari 安全开关、Gatekeeper 或原版应用。
 
-```sh
-npm run test:serve
-```
-
-打开 `http://localhost:8173`，优先使用页面中的用户提供 SpeedMaster 4.1 工具栏适配版/API 样例。适配版、未改动原版及早期原创样例分别标注，见 [SpeedMaster 回归](docs/speedmaster-regression.md)；当前尚未完成 Safari 真机验证。停止测试服务器使用 Ctrl+C。
+按 [测试方法](docs/testing.md) 在 Safari 中手动验证；当前尚未完成 Safari 真机端到端验收。`node tests/user-scripts-webkit.js <目录>` 可先在真实 WebKit 中检查一批脚本能否启动、注册的菜单和 DOM 效果。
 
 ## 文档
 
@@ -87,7 +80,6 @@ npm run test:serve
 - [安全模型与阻塞项](docs/security-model.md)
 - [迁移与恢复](docs/migration.md)
 - [测试方法及记录](docs/testing.md)
-- [SpeedMaster 4.1 来源、适配与回归](docs/speedmaster-regression.md)
 - [构建及安装](docs/build-guide.md)
 - [初始化卡住修复与证据](docs/native-startup-fix.md)
 - [验收清单](docs/acceptance.md)

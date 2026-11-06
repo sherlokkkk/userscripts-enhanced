@@ -23,7 +23,6 @@
 | 权限检查                                     | 部分支持           | grant、source revision、connect、宿主权限检查；独立授权 UI/历史未完成                    |
 | 恶意脚本数据隔离                             | 已修复已知绕过     | Build 6 封堵 top/编译器/定时器/import 路径；JSDOM 与 WebKit 审计 30/30 阻断，Safari 待验 |
 | 网页消息与命令边界                           | 已实现但未完整验证 | 来源/文档路由测试通过；Safari 对抗实测待完成                                             |
-| SpeedMaster 用户提供的 4.1                   | 部分支持           | 原版快照和工具栏适配版已有 6 项模型回归；Safari 未验证，见 speedmaster-regression.md     |
 | 真实 Safari、多窗口、多 frame、后台重启      | 尚未验证           | 初始化已实测；完整菜单及多窗口/frame 未完成                                              |
 | 性能与长时间稳定性                           | 部分支持           | Node 微基准有实测，Safari IPC/CPU/内存/SPA/长时间未测                                    |
 | 键盘、VoiceOver、深浅色                      | 已实现但未完整验证 | 基础语义/样式保留；真实辅助技术验收待完成                                                |

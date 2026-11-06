@@ -23,13 +23,7 @@ Node 测试使用浏览器消息/DOM 模型和实际模块；引擎测试由 Vit
 
 ## Safari 准备
 
-用户已自行启用扩展，Build 2 已实测管理页初始化恢复，详见 native-startup-fix.md。仍不代操作站点权限或系统安全设置；localhost 回归须用户授权后执行：
-
-```sh
-npm run test:serve
-```
-
-访问 `http://localhost:8173`，从页面链接预览导入 SpeedMaster 4.1 工具栏适配测试版和 API 样例，或运行 `npm run prepare:speedmaster` 后从 `tests/local/` 导入。只启用一个倍速脚本。视频是本地生成的样例。用户提供的原版不注册菜单；来源、适配及 6 项新增回归见 speedmaster-regression.md，Safari 仍待验证。
+在 Safari 设置中启用 Enhanced 扩展并授予测试站点权限（管理页初始化见 native-startup-fix.md）。导入 `tests/fixtures/panel-controls.user.js` 等测试脚本，或用 `node tests/user-scripts-webkit.js <目录>` 先在真实 WebKit 中检查脚本。
 
 每项记录 macOS/Safari 版本、脚本版本、站点授权、操作、实际结果与截图；未经执行的项目保持待验证。
 

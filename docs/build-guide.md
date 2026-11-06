@@ -62,7 +62,7 @@ Debug URL scheme 为 userscripts-enhanced；Release 为 userscripts-enhanced-rel
 1. 打开独立 Enhanced Debug 应用，选择“打开 Safari 设置”。
 2. 在 Safari 扩展设置选择 Enhanced（不要改变 App Store 原版），确认扩展和 localhost 测试站点许可。
 3. 先阅读安全门禁说明，只做隔离的开发测试；当前没有日用安全验收。
-4. 运行 `npm run test:serve`，打开 `http://localhost:8173`，按 testing.md 验证。
+4. 按 testing.md 验证。
 
 如果扩展不出现，应先核对签名、Team、容器标识和实际注册路径，再按 [Apple 运行指南](https://developer.apple.com/documentation/safariservices/running-your-safari-web-extension) 诊断。没有通过修改“允许未签名扩展”、Gatekeeper 或其他系统安全设置来掩盖签名问题。
 

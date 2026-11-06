@@ -1,13 +1,12 @@
 # 维护路线
 
-维护工程位于 `Userscripts-Enhanced`，分支 `enhanced/toolbar-runtime`；尚未推送或发布。桌面初期副本不作为维护入口。许可证保持 GPL-3.0，修改与分发须遵守 LICENSE。
+本仓库是 quoid/userscripts 的非官方分支。许可证保持 GPL-3.0，修改与分发须遵守 LICENSE。
 
 ## 发布前阻塞
 
 1. 替换继承的特权 realm 内动态执行模式。用户脚本必须无法访问 browser、扩展存储或其他脚本；遮蔽全局变量不构成安全隔离。先让 `npm run audit:sandbox` 的真实攻击复现失败，再将门禁改为通过；不能删除或跳过门禁。
 2. 在 Safari 真机完成隔离攻击、工具栏菜单、frame 导航、双窗口、后台重启、权限和生命周期测试。Node 模型测试不等价于此步骤。
-3. 用户已提供 SpeedMaster Safari 4.1，原版快照及工具栏适配已接入模型测试；继续完成 Safari 真机回归。原创样例只用于独立诊断。
-4. 完成原生导入/备份/更新恢复故障注入，特别是文件与 browser.storage 跨存储失败、并发编辑及恢复中断。
+3. 完成原生导入/备份/更新恢复故障注入，特别是文件与 browser.storage 跨存储失败、并发编辑及恢复中断。
 
 ## 每次变更
 

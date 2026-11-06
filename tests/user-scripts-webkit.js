@@ -1,11 +1,17 @@
-// Runs the locally installed user scripts (tests/local/final-scripts) through the
+// Runs the .user.js files of a directory you choose through the
 // unmodified production engine inside a real WKWebView isolated content world.
 // Reports per-script startup errors, registered menu commands and DOM effects.
 import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { buildEngine } from "./helpers/engine-harness.js";
 
-const dir = process.argv[2] ?? "tests/local/final-scripts";
+const dir = process.argv[2];
+if (!dir) {
+	console.error(
+		"Usage: node tests/user-scripts-webkit.js <directory of .user.js files>",
+	);
+	process.exit(64);
+}
 const files = (await readdir(dir)).filter((f) => f.endsWith(".user.js"));
 const scripts = [];
 for (const [index, file] of files.entries()) {

@@ -2,7 +2,7 @@
 // @name         Enhanced 控件示例
 // @namespace    userscripts-enhanced.examples
 // @version      1.0.0
-// @match        http://localhost:8173/*
+// @match        https://example.com/*
 // @grant        UE.registerPanel
 // @grant        GM_registerMenuCommand
 // @grant        GM.registerMenuCommand

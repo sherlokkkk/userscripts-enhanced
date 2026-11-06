@@ -43,7 +43,6 @@ export default [
 			"xcode/",
 			"public/",
 			"artifacts/",
-			"tests/reference/",
 			"tests/local/",
 		],
 	},
@@ -75,7 +74,7 @@ export default [
 		},
 	},
 	{
-		files: ["tests/fixtures/*.user.js", "skills/**/assets/*.user.js"],
+		files: ["tests/fixtures/*.user.js"],
 		languageOptions: {
 			globals: {
 				...globals.browser,
