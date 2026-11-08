@@ -1,5 +1,5 @@
 {
-	"checkedAt": "2026-11-06T09:56:05.862Z",
+	"checkedAt": "2026-11-08T14:54:33.564Z",
 	"gate": "hostile-userscript-isolation",
 	"passed": true,
 	"finding": "All explicit escape attempts blocked; granted storage, real DOM, menu and panel callbacks work.",

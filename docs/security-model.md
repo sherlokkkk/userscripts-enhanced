@@ -15,6 +15,8 @@
 
 **验证：** 两个审计（JSDOM 与真实 WebKit）现各含 30 条攻击路径（新增 14 条 top/编译器/定时器/import 路径），全部阻断，菜单、面板回调与 GM 存储等正向检查通过；JSDOM 负对照（恢复旧执行路径）仍能检出泄漏。`tests/sandbox-hardening.test.js` 覆盖 import 改写、严格/兼容模式、安全编译器。
 
+**Build 8 补充：** Safari 会把 all_frames 内容脚本注入 realm iframe（near-membrane 的 document.open 让它带上网页地址），注入的代码与脚本 realm 处于同一世界。realm iframe 带 `data-ue-realm` 属性与全局标记，入口脚本在其中立即退出；脚本代码里的 `browser/chrome/safari` 由外层参数固定为 undefined，不受 Safari 之后在该 frame 放入的对象影响。`tests/realm-frames-webkit.js` 以全 frame 注入模拟这一行为。
+
 **兼容性代价：**
 
 - 严格模式下给未声明变量赋值（`x = 1`）会抛 ReferenceError；`with` 语句、八进制字面量等严格模式禁止的语法不可用。

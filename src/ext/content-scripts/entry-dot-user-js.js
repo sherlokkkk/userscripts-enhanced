@@ -1,4 +1,6 @@
+import { insideScriptRealm } from "./realm-guard.js";
 async function initialize() {
+	if (insideScriptRealm()) return;
 	// avoid duplicate injection of content scripts
 	if (window["CS_ENTRY_DOT_USER_JS"]) return;
 	window["CS_ENTRY_DOT_USER_JS"] = 1;

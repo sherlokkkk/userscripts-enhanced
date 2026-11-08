@@ -38,7 +38,23 @@ for (const [index, file] of files.entries()) {
 		},
 	});
 }
-const source = `(() => {
+const engine = await buildEngine();
+// With UE_ALL_FRAMES=1 the runner injects into every frame, as Safari does
+// with all_frames content scripts. Subframes (including the hidden realm
+// iframes) then get only the engine, like Safari's content script, and report
+// their errors to the top frame.
+const frameSource = `(() => {
+ if (window === window.top) return false;
+ const sink = (window.top.__ueFrameErrors ??= []);
+ const text = (x) => String(x?.message ? x.message + " @ " + x.stack : x);
+ console.error = (...a) => sink.push("frame: " + a.map(text).join(" "));
+ window.addEventListener("error", (e) => sink.push("frame window.error: " + e.message));
+ window.addEventListener("unhandledrejection", (e) => sink.push("frame rejection: " + text(e.reason)));
+ if (!("browser" in window)) window.browser = { runtime: { id: "enhanced", onMessage: { addListener() {}, removeListener() {} }, sendMessage: async () => ({ files: { js: [], css: [], menu: [] } }) }, storage: { local: { get: async () => ({}), set: async () => {} }, onChanged: { addListener() {}, removeListener() {} } } };
+ try { ${engine} } catch (e) { sink.push("frame throw: " + text(e)); }
+ return true;
+})()`;
+const source = `if (!${frameSource}) (() => {
  const finish = window.webkit.messageHandlers.result.postMessage.bind(window.webkit.messageHandlers.result);
  const scripts = ${JSON.stringify(scripts)};
  const handlers = new Set(), storageHandlers = new Set(), errors = [], data = {};
@@ -61,7 +77,7 @@ const source = `(() => {
    for(const fn of storageHandlers)fn(changed,'local');
   }},onChanged:{addListener:fn=>storageHandlers.add(fn),removeListener:fn=>storageHandlers.delete(fn)}}
  };
- ${await buildEngine()}
+ ${engine}
  const message = async value => {for(const fn of handlers){const result=fn(value,{id:'enhanced'});if(result!==undefined)return await result;}};
  const attackOut=()=>document.body.dataset.attack;const count=()=>{let n=0;const walk=r=>{for(const e of r.querySelectorAll('*')){n++;if(e.shadowRoot)walk(e.shadowRoot);}};walk(document);return n;};
  setTimeout(async()=>{
@@ -81,7 +97,7 @@ const source = `(() => {
    const snapshot=await message({name:'UE_MENU_SNAPSHOT'});
    const runs={};
    for(const s of snapshot.scripts)for(const c of s.commands){if(!/^(显示|打开)/.test(c.title))continue;const b=count();const r=await message({name:'UE_MENU_EXECUTE',documentId:snapshot.documentId,scriptId:s.scriptId,commandId:c.commandId});await new Promise(r=>setTimeout(r,200));runs[c.title]={result:r,added:count()-b};}
-   finish({passed:true,attack:attackOut()?JSON.parse(attackOut()):null,before,afterClick,afterKey,html0,htmlAfter:document.body.innerHTML.length,ds:{...document.body.dataset},
+   finish({passed:true,frameErrors:window.__ueFrameErrors??[],attack:attackOut()?JSON.parse(attackOut()):null,before,afterClick,afterKey,html0,htmlAfter:document.body.innerHTML.length,ds:{...document.body.dataset},
     runs,menus:snapshot.scripts.map(s=>({scriptId:s.scriptId,commands:s.commands.map(c=>c.title),panel:!!s.panel})),
     errors,warns:warns.slice(0,20)});
   }catch(e){finish({passed:false,error:String(e.stack??e),errors});}

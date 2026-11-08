@@ -1,3 +1,4 @@
+import { insideScriptRealm } from "./realm-guard.js";
 import { createScriptSandbox } from "./script-sandbox.js";
 import { createTabAPI } from "./tab-runtime.js";
 import { createPageAPI } from "./page-api.js";
@@ -661,6 +662,7 @@ function listeners() {
 }
 
 async function initialize() {
+	if (insideScriptRealm()) return;
 	// avoid duplicate injection of content scripts
 	if (window["CS_ENTRY_USERSCRIPTS"]) return;
 	window["CS_ENTRY_USERSCRIPTS"] = 1;

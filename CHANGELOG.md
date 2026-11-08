@@ -2,6 +2,8 @@
 
 ## 0.1.0 开发预览 — 2026-11-06
 
+Build 8 修复 Safari 报错 `undefined is not an object (evaluating 'browser.storage.local')`：Safari 会把 all_frames 内容脚本也注入隐藏的脚本 realm iframe（document.open 后带有网页地址），入口在那里遇到被拒绝的 `browser` 而失败。realm iframe 现带标记，三个入口在其中直接退出；用户脚本中的 `browser/chrome/safari` 恒为 undefined。新增 tests/realm-frames-webkit.js（纳入 verify，含负对照验证）。
+
 Build 7 新增脚本快捷键管理：源码静态检测加运行时观察，在弹窗中显示，并可逐个停用、改键或还原（隔离脚本，即时生效）。新增 tests/shortcuts.test.js 与 tests/keyboard-webkit.js（真实 WebKit，纳入 verify）。
 
 Build 6 自建 realm 链接：宿主 window 进入脚本时对应脚本自己的 scope，不再暴露 realm 原始全局对象；拒绝宿主端代码编译入口与字符串定时器；realm 内 Function/eval/构造器改为在 scope 内编译；默认严格模式；改写动态 import()。新增每脚本“兼容模式（不安全）”。审计扩充到 30 条路径，JSDOM 与 WebKit 均全部阻断。

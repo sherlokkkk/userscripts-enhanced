@@ -17,9 +17,10 @@
 		"test": "node --test tests/*.test.js",
 		"test:performance": "node --expose-gc tests/performance.js",
 		"audit:sandbox": "node tests/sandbox-audit.js",
-		"verify": "npm run lint:js && npm run lint:css && npm test && npm run audit:sandbox && npm run audit:sandbox:webkit && npm run test:keyboard:webkit",
+		"verify": "npm run lint:js && npm run lint:css && npm test && npm run audit:sandbox && npm run audit:sandbox:webkit && npm run test:keyboard:webkit && npm run test:realm-frames:webkit",
 		"audit:sandbox:webkit": "node tests/sandbox-webkit.js",
-		"test:keyboard:webkit": "node tests/keyboard-webkit.js"
+		"test:keyboard:webkit": "node tests/keyboard-webkit.js",
+		"test:realm-frames:webkit": "node tests/realm-frames-webkit.js"
 	},
 	"devDependencies": {
 		"@sveltejs/vite-plugin-svelte": "^5.0.3",

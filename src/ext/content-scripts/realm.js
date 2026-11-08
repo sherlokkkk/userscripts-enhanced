@@ -5,6 +5,7 @@ import {
 	createRedConnector,
 	getFilteredGlobalOwnKeys,
 } from "@locker/near-membrane-base";
+import { REALM_ATTRIBUTE, REALM_MARK } from "./realm-guard.js";
 
 // A per-script iframe realm wired like @locker/near-membrane-dom's attached
 // ("keepAlive") environment, with two deliberate differences in how identities
@@ -102,12 +103,15 @@ export function createRealm({
 		"allow-same-origin allow-scripts",
 	]);
 	nativeApply(setAttribute, frame, ["aria-hidden", "true"]);
+	nativeApply(setAttribute, frame, [REALM_ATTRIBUTE, ""]);
 	const parent =
 		nativeApply(bodyGetter, document, []) ??
 		nativeApply(lastChildGetter, document, []);
 	nativeApply(appendChild, parent, [frame]);
 	const redWindow = nativeApply(contentWindowGetter, frame, []);
 	if (!redWindow) throw new Error("Realm frame unavailable");
+	// Content scripts Safari injects into this frame must recognise it.
+	Object.defineProperty(redWindow, REALM_MARK, { value: true });
 	const redDocument = redWindow.document;
 	blueConnector ??= createBlueConnector(window);
 	const env = new VirtualEnvironment({

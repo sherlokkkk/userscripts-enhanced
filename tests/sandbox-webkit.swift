@@ -8,7 +8,7 @@ final class IsolationRunner: NSObject, WKScriptMessageHandler {
         let configuration = WKWebViewConfiguration()
         let world = WKContentWorld.world(name: "UserscriptsEnhancedAudit")
         configuration.userContentController.add(self, contentWorld: world, name: "result")
-        configuration.userContentController.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: world))
+        configuration.userContentController.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: ProcessInfo.processInfo.environment["UE_ALL_FRAMES"] == nil, in: world))
         view = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
         view.loadHTMLString("<!doctype html><html><head></head><body></body></html>", baseURL: URL(string: "https://isolation-test.invalid"))
     }

@@ -118,6 +118,10 @@ const SCOPE_BOOTSTRAP = `(function (hostLocation, isTop, legacy, scopeKey, impor
 				return { value: hostLocation };
 			case "document":
 				return { value: get(target, "document") };
+			case "browser":
+			case "chrome":
+			case "safari":
+				return { value: undefined };
 		}
 	};
 	// The proxy target is a blank object, so descriptors can be reported
@@ -161,8 +165,8 @@ const SCOPE_BOOTSTRAP = `(function (hostLocation, isTop, legacy, scopeKey, impor
 		setPrototypeOf: () => false,
 		preventExtensions: () => false,
 	});
-	const params = ["window", "self", "globalThis", "top", "parent", "frames", "location", "__ueImport__"];
-	const values = () => [scope, scope, scope, isTop ? scope : opaqueTop, parentValue(), scope, hostLocation, blockedImport];
+	const params = ["window", "self", "globalThis", "top", "parent", "frames", "location", "__ueImport__", "browser", "chrome", "safari"];
+	const values = () => [scope, scope, scope, isTop ? scope : opaqueTop, parentValue(), scope, hostLocation, blockedImport, undefined, undefined, undefined];
 	const mode = legacy ? "" : '"use strict";\\n';
 	// Any text that escapes the inner function still sits inside the outer
 	// one, whose parameters shadow the dangerous globals.
@@ -377,7 +381,7 @@ export function createScriptSandbox(
 		evaluate(source) {
 			if (disposed) throw new Error("Script realm has been disposed");
 			const compiled = environment.evaluate(
-				`(function (window, self, globalThis, top, parent, frames, location, __ueImport__) {${header}\n${neutralizeImports(source)}\n})`,
+				`(function (window, self, globalThis, top, parent, frames, location, __ueImport__, browser, chrome, safari) {${header}\n${neutralizeImports(source)}\n})`,
 			);
 			return invoke(compiled);
 		},
